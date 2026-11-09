@@ -11,7 +11,15 @@ final class Flibusta {
     static final String DEFAULT = "https://flibusta.site/opds";
     static final int BOOK_LIMIT = 32_000_000;
     static final List<String> MIRRORS = Arrays.asList(DEFAULT, "https://flibusta.is/opds");
-    record Entry(String title, String author, String summary, String url, String format, boolean book) {}
+    record Details(String language, String publisher, String issued, String identifier, List<String> genres, String size, long downloads) {}
+    record Entry(String title, String author, String summary, String url, String format, boolean book, Details details) {
+        Entry(String title, String author, String summary, String url, String format, boolean book) {
+            this(title, author, summary, url, format, book, new Details("", "", "", "", List.of(), "", -1));
+        }
+        String description() {
+            return summary.replaceAll("(?im)^[ \\t]*(?:Формат|Format|Язык|Language|Размер|Size|Скачиваний|Скачано|Downloads|Download count)[ \\t]*:[^\\r\\n]*(?:\\r?\\n|$)", "").trim();
+        }
+    }
     record Feed(String title, List<Entry> entries, String next) {}
     record Loaded(Feed feed, String url, String base) {}
     static Loaded loadMirrors(String requested, List<String> bases) throws Exception { return loadMirrors(requested, bases, null); }
@@ -100,10 +108,9 @@ final class Flibusta {
         List<Entry> entries = new ArrayList<>(); String next = "";
         for (Element link : children(root, "link")) if (link.getAttribute("rel").equals("next")) next = resolve(base, link.getAttribute("href"));
         for (Element node : children(root, "entry")) {
-            String title = text(node, "title"), author = "", summary = text(node, "content");
-            if (summary.isEmpty()) summary = text(node, "summary");
-            summary = Html.fromHtml(summary, Html.FROM_HTML_MODE_LEGACY).toString().trim();
-            if (summary.length() > 3000) summary = summary.substring(0, 3000) + "…";
+            String title = text(node, "title"), author = "", summary = descriptionText(node, "content");
+            if (summary.isEmpty()) summary = descriptionText(node, "summary");
+            if (summary.length() > 16000) summary = summary.substring(0, 16000) + "…";
             List<String> names = new ArrayList<>(); for (Element person : children(node, "author")) names.add(text(person, "name"));
             author = String.join(", ", names);
             String acquisition = "", navigation = "", format = ""; boolean book = false;
@@ -118,11 +125,58 @@ final class Flibusta {
                 } else if (type.startsWith("application/atom+xml") && navigation.isEmpty() && !rel.equals("alternate") && !rel.equals("related"))
                     navigation = resolve(base, link.getAttribute("href"));
             }
-            if (!acquisition.isEmpty()) entries.add(new Entry(title, author, summary, acquisition, format, true));
-            else if (book) entries.add(new Entry(title, author, summary, "", "", true));
-            else if (!navigation.isEmpty()) entries.add(new Entry(title, author, summary, navigation, "", false));
+            List<String> genres = new ArrayList<>();
+            for (Element category : children(node, "category")) {
+                String label = category.getAttribute("label").trim();
+                if (label.isEmpty()) label = category.getAttribute("term").trim();
+                if (!label.isEmpty() && !genres.contains(label)) genres.add(label);
+            }
+            String language = dcText(node, "language");
+            if (language.isEmpty()) language = summaryValue(summary, "Язык|Language");
+            String issued = dcText(node, "issued");
+            long downloads = -1;
+            String count = summaryValue(summary, "Скачиваний|Скачано|Downloads|Download count");
+            if (count.matches("[0-9 \\u00a0\\u202f]+")) {
+                try { downloads = Long.parseLong(count.replaceAll("[ \\u00a0\\u202f]", "")); }
+                catch (NumberFormatException ignored) { }
+            }
+            Details details = new Details(language, dcText(node, "publisher"), issued, dcText(node, "identifier"),
+                    List.copyOf(genres), summaryValue(summary, "Размер|Size"), downloads);
+            if (!acquisition.isEmpty()) entries.add(new Entry(title, author, summary, acquisition, format, true, details));
+            else if (book) entries.add(new Entry(title, author, summary, "", "", true, details));
+            else if (!navigation.isEmpty()) entries.add(new Entry(title, author, summary, navigation, "", false, details));
         }
         return new Feed(text(root, "title"), entries, next);
+    }
+    private static String dcText(Element node, String local) {
+        for (Node n = node.getFirstChild(); n != null; n = n.getNextSibling())
+            if (n instanceof Element child && local.equals(child.getLocalName())
+                    && ("http://purl.org/dc/terms/".equals(child.getNamespaceURI()) || "http://purl.org/dc/elements/1.1/".equals(child.getNamespaceURI())))
+                return child.getTextContent().trim();
+        return "";
+    }
+    private static String descriptionText(Element node, String name) {
+        var values = children(node, name);
+        if (values.isEmpty()) return "";
+        Element value = values.get(0);
+        if (!value.getAttribute("type").equals("xhtml")) return Html.fromHtml(value.getTextContent(), Html.FROM_HTML_MODE_LEGACY).toString().trim();
+        StringBuilder text = new StringBuilder(); appendDescription(value, text); return text.toString().trim();
+    }
+    private static void appendDescription(Node node, StringBuilder text) {
+        if (node.getNodeType() == Node.TEXT_NODE || node.getNodeType() == Node.CDATA_SECTION_NODE) text.append(node.getNodeValue());
+        else {
+            for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling()) appendDescription(child, text);
+            if (node instanceof Element element && Set.of("br", "p", "div", "li", "h1", "h2", "h3").contains(element.getLocalName())) text.append('\n');
+        }
+    }
+    private static String summaryValue(String summary, String labels) {
+        var match = java.util.regex.Pattern.compile("(?im)^[ \\t]*(?:" + labels + ")[ \\t]*:[ \\t]*([^\\r\\n]+)").matcher(summary);
+        return match.find() ? match.group(1).trim() : "";
+    }
+    static boolean sortByDownloads(List<Entry> entries) {
+        if (entries.isEmpty() || !entries.stream().allMatch(Entry::book) || entries.stream().noneMatch(e -> e.details().downloads() >= 0)) return false;
+        entries.sort(Comparator.comparingLong((Entry e) -> e.details().downloads()).reversed());
+        return true;
     }
     private static List<Element> children(Element element, String local) {
         List<Element> result = new ArrayList<>();

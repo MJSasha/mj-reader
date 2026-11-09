@@ -55,6 +55,25 @@ final class CatalogCheck {
             var first = failover.feed().entries().get(0);
             require(first.book() && first.format().equals("epub") && first.author().equals("MJReader"), "OPDS EPUB preference and author");
             require(failover.feed().next().contains("page=2"), "Next-page URL");
+            require(first.details().downloads() == 1234 && first.details().language().equals("ru") && first.details().size().equals("564 Kb"), "Catalog download metadata");
+            require(first.details().publisher().equals("MJReader Originals") && first.details().issued().equals("2026")
+                    && first.details().identifier().equals("urn:mjreader:orbit") && first.details().genres().equals(List.of("Научная фантастика")), "Publication metadata");
+            require(first.description().contains("Original bilingual test story.") && !first.description().contains("Скачиваний:"), "Description separated from metadata");
+            String xhtml = "<feed xmlns='http://www.w3.org/2005/Atom'><entry><title>Original</title><published>2026-11-09</published>"
+                    + "<content type='xhtml'><div xmlns='http://www.w3.org/1999/xhtml'><p>Original story.</p><p>Language: en</p><p>Downloads: 1&#160;234</p></div></content>"
+                    + "<link rel='http://opds-spec.org/acquisition' type='text/plain' href='/story.txt'/></entry></feed>";
+            var xhtmlBook = Flibusta.parse(xhtml.getBytes(StandardCharsets.UTF_8), origin).entries().get(0);
+            require(xhtmlBook.details().downloads() == 1234 && xhtmlBook.details().language().equals("en") && xhtmlBook.description().equals("Original story."), "XHTML paragraph metadata");
+            require(xhtmlBook.details().issued().isEmpty(), "Catalog timestamp is not an edition date");
+            var sorted = new ArrayList<>(failover.feed().entries());
+            require(Flibusta.sortByDownloads(sorted) && sorted.get(0).details().downloads() == 2500, "Most downloaded first");
+            var unknown = new Flibusta.Entry("Unknown", "", "", "https://example.test/unknown", "epub", true);
+            sorted.add(unknown); Flibusta.sortByDownloads(sorted); require(sorted.get(sorted.size() - 1) == unknown, "Unknown counts sort last");
+            String invalid = feed(origin, false).replace("1 234", "999999999999999999999999999999").replace("Скачиваний: 2500", "Скачиваний: -4");
+            var missing = new ArrayList<>(Flibusta.parse(invalid.getBytes(StandardCharsets.UTF_8), origin).entries());
+            require(missing.stream().allMatch(e -> e.details().downloads() == -1) && !Flibusta.sortByDownloads(missing), "Invalid counters preserve catalog order");
+            var navigation = new ArrayList<>(sorted); navigation.add(new Flibusta.Entry("Section", "", "", origin + "/opds", "", false));
+            var beforeSort = List.copyOf(navigation); require(!Flibusta.sortByDownloads(navigation) && beforeSort.equals(navigation), "Navigation order preserved");
             try { Flibusta.parse("<html>Blocked</html>".getBytes(StandardCharsets.UTF_8), origin); throw new AssertionError("HTML accepted as OPDS"); } catch (IOException expected) { }
             try { Flibusta.https("http://example.test/book.epub"); throw new AssertionError("Cleartext accepted"); } catch (IOException expected) { }
             String xxe = "<!DOCTYPE feed [<!ENTITY x SYSTEM 'file:///data/local/tmp/secret'>]><feed xmlns='http://www.w3.org/2005/Atom'><title>&x;</title></feed>";
@@ -88,11 +107,19 @@ final class CatalogCheck {
                     test.runOnMainSync(() -> list.smoothScrollBy(700, 200)); Thread.sleep(300);
                 }
                 require(((List<?>) field(screen, "entries")).size() == 3 && field(screen, "root") == listRoot, "Infinite paging appends without rebuilding screen");
+                require(((Flibusta.Entry) ((List<?>) field(screen, "entries")).get(0)).details().downloads() == 5000, "New pages participate in download sorting");
                 test.runOnMainSync(() -> ((ListView) uncheckedField(screen, "resultsList")).setSelection(0)); test.waitForIdleSync(); capture("catalog-results-" + theme);
                 test.runOnMainSync(() -> invoke(screen, "bookDetails", new Class[]{Flibusta.Entry.class}, first)); test.waitForIdleSync(); capture("catalog-book-" + theme);
                 test.getUiAutomation().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK); test.waitForIdleSync();
                 if (theme == 0) {
-                    test.runOnMainSync(() -> invoke(screen, "download", new Class[]{Flibusta.Entry.class}, first)); awaitUi(screen);
+                    int index = ((List<?>) field(screen, "entries")).indexOf(first);
+                    test.runOnMainSync(() -> ((ListView) uncheckedField(screen, "resultsList")).setSelectionFromTop(index + 1, 0)); test.waitForIdleSync();
+                    capture("catalog-direct-download");
+                    test.runOnMainSync(() -> {
+                        boolean russian = context.getResources().getConfiguration().getLocales().get(0).getLanguage().equals("ru");
+                        Button button = downloadButton(screen.getWindow().getDecorView(), (russian ? "Скачать: " : "Download: ") + first.title());
+                        require(button != null && button.performClick(), "Download directly from book card");
+                    }); awaitUi(screen);
                     String id = BookDownloads.create(context, first); jobs.add(id); JSONObject complete = waitState(id, "complete", 20000);
                     String bookId = complete.getString("book"); imported.add(bookId);
                     Books.Book book = new Books(context).list().stream().filter(b -> b.id().equals(bookId)).findFirst().orElseThrow();
@@ -141,8 +168,8 @@ final class CatalogCheck {
         } catch (Exception ignored) { }
     }
     private String feed(String origin, boolean second) {
-        String result = "<feed xmlns='http://www.w3.org/2005/Atom'><title>Книги для нового путешествия</title><link rel='next' href='?page=2'/><entry><title>Орбита из каталога</title><author><name>MJReader</name></author><content>История о маяке на орбите. Original bilingual test story.</content><link rel='http://opds-spec.org/acquisition/open-access' type='application/fb2+zip' href='/not-used.fb2'/><link rel='http://opds-spec.org/acquisition/open-access' type='application/epub+zip' href='" + origin + "/book.epub'/></entry><entry><title>Долгая история</title><author><name>MJReader</name></author><link rel='http://opds-spec.org/acquisition/open-access' type='text/plain' href='" + origin + "/slow.txt'/></entry></feed>";
-        if (second) result = result.replace("<link rel='next' href='?page=2'/>", "").replace("</feed>", "<entry><title>Новая история</title><author><name>MJReader</name></author><link rel='http://opds-spec.org/acquisition/open-access' type='application/epub+zip' href='" + origin + "/book.epub?edition=2'/></entry></feed>");
+        String result = "<feed xmlns='http://www.w3.org/2005/Atom' xmlns:dc='http://purl.org/dc/terms/'><title>Книги для нового путешествия</title><link rel='next' href='?page=2'/><entry><title>Орбита из каталога</title><author><name>MJReader</name></author><dc:language>ru</dc:language><dc:publisher>MJReader Originals</dc:publisher><dc:issued>2026</dc:issued><dc:identifier>urn:mjreader:orbit</dc:identifier><category term='sf' label='Научная фантастика'/><content type='html'>История о маяке на орбите. Original bilingual test story.&lt;br/&gt;Язык: ru&lt;br/&gt;Размер: 564 Kb&lt;br/&gt;Скачиваний: 1 234&lt;br/&gt;</content><link rel='http://opds-spec.org/acquisition/open-access' type='application/fb2+zip' href='/not-used.fb2'/><link rel='http://opds-spec.org/acquisition/open-access' type='application/epub+zip' href='" + origin + "/book.epub'/></entry><entry><title>Долгая история</title><author><name>MJReader</name></author><content>Скачиваний: 2500</content><link rel='http://opds-spec.org/acquisition/open-access' type='text/plain' href='" + origin + "/slow.txt'/></entry></feed>";
+        if (second) result = result.replace("<link rel='next' href='?page=2'/>", "").replace("</feed>", "<entry><title>Новая история</title><author><name>MJReader</name></author><content>Скачиваний: 5000</content><link rel='http://opds-spec.org/acquisition/open-access' type='application/epub+zip' href='" + origin + "/book.epub?edition=2'/></entry></feed>");
         return result;
     }
     private byte[] epub() throws Exception {
@@ -156,6 +183,13 @@ final class CatalogCheck {
         return bytes.toByteArray();
     }
     private void entry(ZipOutputStream zip, String name, String data) throws IOException { zip.putNextEntry(new ZipEntry(name)); zip.write(data.getBytes(StandardCharsets.UTF_8)); zip.closeEntry(); }
+    private Button downloadButton(View view, String description) {
+        if (view instanceof Button button && description.equals(button.getContentDescription())) return button;
+        if (view instanceof ViewGroup group) for (int i = 0; i < group.getChildCount(); i++) {
+            Button button = downloadButton(group.getChildAt(i), description); if (button != null) return button;
+        }
+        return null;
+    }
     private JSONObject waitState(String id, String state, long timeout) throws Exception {
         long end = System.currentTimeMillis() + timeout; JSONObject job = null;
         while (System.currentTimeMillis() < end) { job = BookDownloads.get(context, id); if (job.optString("state").equals(state)) return job; if (job.optString("state").equals("error")) throw new AssertionError(job.toString()); Thread.sleep(100); }

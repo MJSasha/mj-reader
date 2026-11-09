@@ -555,10 +555,23 @@ public class ReaderSmokeTest extends Instrumentation {
                 } finally { runOnMainSync(library::finish); }
                 CatalogActivity catalog = (CatalogActivity) startActivitySync(new Intent(context, CatalogActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                 try {
+                    var book = new Flibusta.Entry("Станция «Тишина»", "MJReader Originals", "История о маяке на орбите. A new chapter begins. ".repeat(12),
+                            "https://example.test/orbit.epub", "epub", true,
+                            new Flibusta.Details("ru", "MJReader Originals", "2026", "urn:mjreader:orbit", java.util.List.of("Научная фантастика"), "564 Kb", 1234));
+                    runOnMainSync(() -> {
+                        ((java.util.List<Flibusta.Entry>) field(catalog, "entries")).add(book);
+                        invoke(catalog, "render");
+                    });
                     waitForIdleSync();
                     assertTouchTargets(catalog.getWindow().getDecorView());
                     capture("chrome-catalog-" + scenario);
                     boolean russian = context.getResources().getConfiguration().getLocales().get(0).getLanguage().equals("ru");
+                    ViewGroup before = (ViewGroup) field(catalog, "root");
+                    TextView tab = find(before.getChildAt(before.getChildCount() - 1), russian ? "Каталог" : "Catalog");
+                    if (scenario < 2 && tab.getHeight() > 52 * context.getResources().getDisplayMetrics().density) throw new AssertionError("Catalog tab is too tall");
+                    runOnMainSync(() -> invoke(catalog, "bookDetails", new Class[]{Flibusta.Entry.class}, book));
+                    waitForIdleSync(); capture("chrome-book-details-" + scenario);
+                    clickSystem(russian ? "Закрыть" : "Close");
                     click(catalog, russian ? "Загрузки" : "Downloads");
                     ViewGroup root = (ViewGroup) field(catalog, "root");
                     TextView selected = find(root.getChildAt(root.getChildCount() - 1), russian ? "Загрузки" : "Downloads");

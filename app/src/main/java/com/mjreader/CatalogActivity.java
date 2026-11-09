@@ -188,12 +188,37 @@ public class CatalogActivity extends Activity {
     }
     private View resultCard(Flibusta.Entry entry) {
         LinearLayout card = card();
-        LinearLayout badge = row(); ImageView icon = new ImageView(CatalogActivity.this); icon.setImageDrawable(new ReaderIcon(CatalogActivity.this, entry.book() ? "book" : "folder", theme.accent())); badge.addView(icon, new LinearLayout.LayoutParams(dp(22), dp(22))); space(badge);
-        badge.addView(text(entry.book() ? entry.format().isEmpty() ? tr("ДРУГОЙ ФОРМАТ", "OTHER FORMAT") : entry.format().toUpperCase(Locale.ROOT) : tr("РАЗДЕЛ КАТАЛОГА", "CATALOG SECTION"), 12, theme.accent())); card.addView(badge); gap(card, 10);
+        LinearLayout heading = row(); heading.setGravity(Gravity.TOP);
+        TextView emblem = text(entry.book() && !entry.title().isEmpty() ? entry.title().substring(0, entry.title().offsetByCodePoints(0, 1)).toUpperCase(Locale.ROOT) : "", 28, theme.accent());
+        emblem.setGravity(Gravity.CENTER); emblem.setTypeface(Typeface.create("serif", Typeface.BOLD));
+        GradientDrawable tile = shape(theme.background(), 10); tile.setStroke(dp(1), theme.accent()); emblem.setBackground(tile);
+        if (!entry.book()) emblem.setCompoundDrawablesRelativeWithIntrinsicBounds(null, new ReaderIcon(this, "folder", theme.accent()), null, null);
+        emblem.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        heading.addView(emblem, new LinearLayout.LayoutParams(dp(52), dp(72))); space(heading);
+        LinearLayout identity = column();
+        String category = entry.details().genres().isEmpty() ? tr(entry.book() ? "КНИГА" : "РАЗДЕЛ", entry.book() ? "BOOK" : "SECTION") : entry.details().genres().get(0);
+        TextView genre = text(category, 11, theme.accent()); genre.setMaxLines(1); genre.setEllipsize(android.text.TextUtils.TruncateAt.END); identity.addView(genre); gap(identity, 4);
         TextView title = text(entry.title(), 19, theme.ink()); title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setMaxLines(3); title.setEllipsize(android.text.TextUtils.TruncateAt.END); card.addView(title);
-        if (!entry.author().isEmpty()) { gap(card, 6); card.addView(text(entry.author(), 14, theme.muted())); }
-        if (!entry.summary().isEmpty()) { gap(card, 8); TextView summary = text(entry.summary(), 14, theme.muted()); summary.setMaxLines(3); summary.setEllipsize(android.text.TextUtils.TruncateAt.END); card.addView(summary); }
+        title.setMaxLines(3); title.setEllipsize(android.text.TextUtils.TruncateAt.END); identity.addView(title);
+        if (!entry.author().isEmpty()) { gap(identity, 6); TextView author = text(entry.author(), 14, theme.muted()); author.setMaxLines(2); author.setEllipsize(android.text.TextUtils.TruncateAt.END); identity.addView(author); }
+        heading.addView(identity, weight()); card.addView(heading);
+        if (!entry.description().isEmpty()) { gap(card, 14); TextView summary = text(entry.description(), 14, theme.muted()); summary.setMaxLines(3); summary.setEllipsize(android.text.TextUtils.TruncateAt.END); card.addView(summary); }
+        if (entry.book()) {
+            gap(card, 14);
+            List<String> facts = new ArrayList<>();
+            if (!entry.format().isEmpty()) facts.add(entry.format().toUpperCase(Locale.ROOT));
+            if (!entry.details().language().isEmpty()) facts.add(entry.details().language().toUpperCase(Locale.ROOT));
+            if (!entry.details().size().isEmpty()) facts.add(entry.details().size());
+            if (!facts.isEmpty()) card.addView(text(String.join(" · ", facts), 12, theme.accent()));
+            if (entry.details().downloads() >= 0) { gap(card, 6); card.addView(text(downloadCount(entry), 12, theme.muted())); }
+            gap(card, 10); card.addView(text(tr("Подробнее →", "Book details →"), 13, theme.ink()));
+            if (!entry.format().isEmpty()) {
+                gap(card, 12);
+                Button download = control(tr("Скачать", "Download"), "download", true, () -> download(entry));
+                download.setContentDescription(tr("Скачать: ", "Download: ") + entry.title());
+                card.addView(download, match());
+            }
+        }
         card.setBackground(theme.feedback(shape(theme.surface(), 20), getResources().getDisplayMetrics().density));
         card.setOnClickListener(v -> {
             if (entry.book()) bookDetails(entry);
@@ -232,14 +257,26 @@ public class CatalogActivity extends Activity {
                 if (automatic) prefs.edit().putString("catalog.last", loaded.base()).apply();
                 runOnUiThread(() -> {
                     if (!valid(token)) return;
+                    if (append) rememberScroll();
+                    Flibusta.Entry visibleEntry = append && catalogItem >= 0 && catalogItem < entries.size() ? entries.get(catalogItem) : null;
                     if (!append) { entries.clear(); loadedPages.clear(); currentUrl = loaded.url(); pendingUrl = ""; catalogItem = -1; catalogTop = 0; }
                     loadedPages.add(address); loadedPages.add(loaded.url());
                     Set<String> existing = new HashSet<>(); for (Flibusta.Entry entry : entries) existing.add(entryKey(entry));
                     for (Flibusta.Entry entry : loaded.feed().entries()) if (existing.add(entryKey(entry))) entries.add(entry);
+                    boolean sorted = Flibusta.sortByDownloads(entries);
                     next = loaded.feed().next(); if (loadedPages.contains(next)) next = "";
                     feedTitle = loaded.feed().title(); busy = false; loadingMore = false; pagingFailed = false;
-                    message = feedTitle + (entries.isEmpty() ? "" : " · " + entries.size());
-                    if (append) { if (resultStatus != null) resultStatus.setText(message); if (adapter != null) adapter.notifyDataSetChanged(); updatePaging(); fillViewport(); }
+                    message = feedTitle + (entries.isEmpty() ? "" : " · " + entries.size())
+                            + (sorted ? tr(" · По скачиваниям среди загруженных", " · Most downloaded among loaded books") : "");
+                    if (append) {
+                        if (resultStatus != null) resultStatus.setText(message);
+                        if (adapter != null) adapter.notifyDataSetChanged();
+                        if (sorted && visibleEntry != null && resultsList != null) {
+                            catalogItem = entries.indexOf(visibleEntry);
+                            resultsList.setSelectionFromTop(catalogItem / catalogColumns() + 1, catalogTop);
+                        }
+                        updatePaging(); fillViewport();
+                    }
                     else render();
                 });
             } catch (Exception error) {
@@ -288,11 +325,31 @@ public class CatalogActivity extends Activity {
     }
     private boolean valid(int token) { return !isDestroyed() && token == generation; }
     private void bookDetails(Flibusta.Entry entry) {
-        ReaderDialogs dialog = new ReaderDialogs(this, theme).setTitle(entry.title()).setMessage(entry.author() + (entry.summary().isEmpty() ? "" : "\n\n" + entry.summary())
-                + (entry.format().isEmpty() ? tr("\n\nУ этой записи нет прямой ссылки на EPUB или TXT.", "\n\nThis entry has no direct EPUB or TXT link.") : "\n\n" + entry.format().toUpperCase(Locale.ROOT)))
+        LinearLayout page = column();
+        if (!entry.author().isEmpty()) { page.addView(text(entry.author(), 17, theme.accent())); gap(page, 16); }
+        detail(page, tr("Жанры", "Genres"), String.join(" · ", entry.details().genres()));
+        detail(page, tr("Язык", "Language"), entry.details().language());
+        detail(page, tr("Издательство", "Publisher"), entry.details().publisher());
+        detail(page, tr("Дата издания", "Published"), entry.details().issued());
+        detail(page, tr("Идентификатор издания", "Edition identifier"), entry.details().identifier());
+        detail(page, tr("Формат загрузки", "Download format"), entry.format().toUpperCase(Locale.ROOT));
+        detail(page, tr("Размер в каталоге", "Catalog file size"), entry.details().size());
+        if (entry.details().downloads() >= 0) { page.addView(text(downloadCount(entry), 14, theme.accent())); gap(page, 16); }
+        if (!entry.description().isEmpty()) detail(page, tr("Аннотация", "Description"), entry.description());
+        else { page.addView(text(tr("Каталог не предоставил аннотацию.", "No description supplied by the catalog."), 14, theme.muted())); gap(page, 12); }
+        if (entry.format().isEmpty()) page.addView(text(tr("У этой записи нет прямой ссылки на EPUB или TXT.", "This entry has no direct EPUB or TXT link."), 14, theme.muted()));
+        ReaderDialogs dialog = new ReaderDialogs(this, theme).setTitle(entry.title()).setView(page)
                 .setNegativeButton(tr("Закрыть", "Close"), null);
         if (!entry.format().isEmpty()) dialog.setPositiveButton(tr("Скачать", "Download"), (d, w) -> download(entry));
         dialog.show();
+    }
+    private void detail(LinearLayout page, String label, String value) {
+        if (value.isEmpty()) return;
+        page.addView(text(label, 12, theme.muted())); gap(page, 4);
+        TextView content = text(value, 16, theme.ink()); content.setTextIsSelectable(true); page.addView(content); gap(page, 14);
+    }
+    private String downloadCount(Flibusta.Entry entry) {
+        return tr("Скачиваний: ", "Downloads: ") + java.text.NumberFormat.getIntegerInstance(getResources().getConfiguration().getLocales().get(0)).format(entry.details().downloads());
     }
     private void download(Flibusta.Entry entry) {
         rememberQuery(); rememberScroll();
@@ -433,10 +490,8 @@ public class CatalogActivity extends Activity {
         Button button = control(label, icon, selected, action);
         int color = selected ? theme.onAccent() : theme.muted();
         button.setTextColor(color); button.setSelected(selected); button.setGravity(Gravity.CENTER);
-        button.setTextSize(13); button.setMinHeight(dp(64)); button.setMinimumHeight(dp(64));
-        button.setPadding(dp(8), dp(8), dp(8), dp(8));
-        button.setCompoundDrawablesRelativeWithIntrinsicBounds(null, new ReaderIcon(this, icon, color), null, null);
-        button.setCompoundDrawablePadding(dp(4));
+        button.setTextSize(14);
+        button.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, icon, color), null, null, null);
         return button;
     }
     private LinearLayout column() { LinearLayout view = new LinearLayout(this); view.setOrientation(LinearLayout.VERTICAL); return view; }

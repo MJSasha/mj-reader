@@ -8,7 +8,8 @@ Use Android Views with branded control drawing and dialogs, preserving native ac
 - Menu actions, settings sections and playback controls share 24-unit outline icons from ReaderIcon. Icons inherit semantic foreground colors; adjacent text supplies the accessible name.
 - Android controls have a minimum 48 dp target. Adjacent buttons have 8 dp spacing. Icon-only controls use native vector drawing and accessible descriptions.
 - Body and UI text use sp. Large text reduces the number of library columns according to available width. Small-height reading layouts place mode switching first in the reading menu.
-- Library and catalog mastheads stay fixed while search and content scroll. Bottom actions sit on a rounded surface with a 12 dp content gap; catalog destinations use centered icons above labels and a filled accent selection.
+- Library and catalog mastheads stay fixed while search and content scroll. Bottom actions sit on a rounded surface with a 12 dp content gap; catalog destinations use inline icons and labels, 48 dp minimum height and a filled accent selection.
+- Catalog book cards use a typographic book tile, genre, title/author, description excerpt and supplied download metadata. Details show the full available description and publication metadata; never invent missing fields. Download ordering applies to loaded book entries with supplied counters, preserves navigation feeds and retains the visible book during paging.
 - Library rows are virtualized through ListView. Covers use bounded decoding and a 24-entry bitmap cache.
 - Reading width is bounded on tablets. Controls respect system bars and screen insets.
 - Settings occupy a separate route with preview, grouped cards, inline expanding selectors, theme swatches and custom switches. Back returns to the same book position. Each book can override shared settings.
