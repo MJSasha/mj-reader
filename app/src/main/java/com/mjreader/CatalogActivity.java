@@ -127,15 +127,20 @@ public class CatalogActivity extends Activity {
         LinearLayout mast = row(); mast.addView(control(tr("Назад", "Back"), "back", false, this::back));
         TextView brand = text("MJ / READER", 12, theme.accent()); brand.setLetterSpacing(.16f); brand.setGravity(Gravity.CENTER);
         mast.addView(brand, new LinearLayout.LayoutParams(0, -1, 1));
-        mast.addView(iconButton(tr("Настройки каталога", "Catalog settings"), "settings", this::catalogSettings)); root.addView(mast); gap(root, 16);
+        mast.addView(iconButton(tr("Настройки каталога", "Catalog settings"), "settings", this::catalogSettings)); root.addView(mast);
+        View mastDivider = new View(this); mastDivider.setBackgroundColor(theme.surface());
+        root.addView(mastDivider, new LinearLayout.LayoutParams(-1, dp(1))); gap(root, 16);
         if (getResources().getConfiguration().screenHeightDp >= 600) {
             root.addView(text(downloads ? tr("Загрузки", "Downloads") : tr("Флибуста", "Flibusta"), 32, theme.ink())); gap(root, 18);
         }
         content = column(); root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
-        LinearLayout dock = row(); dock.setPadding(0, dp(8), 0, 0);
+        LinearLayout dock = row(); dock.setPadding(dp(8), dp(8), dp(8), dp(8));
+        dock.setBackground(shape(theme.surface(), 20));
         dock.addView(navItem(tr("Каталог", "Catalog"), "book", !downloads, () -> switchTab(false)), weight());
+        space(dock);
         dock.addView(navItem(tr("Загрузки", "Downloads"), "download", downloads, () -> switchTab(true)), weight());
-        root.addView(dock);
+        LinearLayout.LayoutParams dockParams = match(); dockParams.topMargin = dp(12);
+        root.addView(dock, dockParams);
         if (busy) loading(); else if (downloads) downloadsPage(); else searchPage();
     }
     private void switchTab(boolean value) {
@@ -425,12 +430,14 @@ public class CatalogActivity extends Activity {
         button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL); return button;
     }
     private View navItem(String label, String icon, boolean selected, Runnable action) {
-        LinearLayout item = column(); Button button = control(label, icon, false, action);
-        int color = selected ? theme.accent() : theme.muted(); button.setTextColor(color); button.setSelected(selected);
-        button.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, icon, color), null, null, null);
-        button.setBackground(theme.feedback(shape(theme.background(), 12), getResources().getDisplayMetrics().density)); item.addView(button, match());
-        View line = new View(this); line.setBackground(shape(selected ? theme.accent() : theme.surface(), 2));
-        LinearLayout.LayoutParams bar = new LinearLayout.LayoutParams(-1, dp(selected ? 3 : 1)); bar.setMargins(dp(28), dp(2), dp(28), 0); item.addView(line, bar); return item;
+        Button button = control(label, icon, selected, action);
+        int color = selected ? theme.onAccent() : theme.muted();
+        button.setTextColor(color); button.setSelected(selected); button.setGravity(Gravity.CENTER);
+        button.setTextSize(13); button.setMinHeight(dp(64)); button.setMinimumHeight(dp(64));
+        button.setPadding(dp(8), dp(8), dp(8), dp(8));
+        button.setCompoundDrawablesRelativeWithIntrinsicBounds(null, new ReaderIcon(this, icon, color), null, null);
+        button.setCompoundDrawablePadding(dp(4));
+        return button;
     }
     private LinearLayout column() { LinearLayout view = new LinearLayout(this); view.setOrientation(LinearLayout.VERTICAL); return view; }
     private LinearLayout row() { LinearLayout view = new LinearLayout(this); view.setGravity(Gravity.CENTER_VERTICAL); return view; }
@@ -446,7 +453,7 @@ public class CatalogActivity extends Activity {
     private EditText field(String value, String hint) { EditText view = new EditText(this); view.setSingleLine(); view.setImeOptions(EditorInfo.IME_FLAG_NO_EXTRACT_UI); view.setText(value); view.setHint(hint); view.setContentDescription(hint); view.setTextSize(16); view.setTextColor(theme.ink()); view.setHintTextColor(theme.muted()); view.setPadding(dp(14), dp(12), dp(14), dp(12)); view.setMinHeight(dp(52)); view.setBackground(theme.feedback(shape(theme.surface(), 16), getResources().getDisplayMetrics().density)); return view; }
     private LinearLayout takeHeader() {
         LinearLayout header = column();
-        while (root.getChildAt(0) != content) { View view = root.getChildAt(0); root.removeViewAt(0); header.addView(view); }
+        while (root.getChildAt(2) != content) { View view = root.getChildAt(2); root.removeViewAt(2); header.addView(view); }
         while (content.getChildCount() > 0) { View view = content.getChildAt(0); content.removeViewAt(0); header.addView(view); }
         return header;
     }

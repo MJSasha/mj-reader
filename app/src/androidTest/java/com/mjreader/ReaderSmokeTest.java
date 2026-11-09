@@ -533,6 +533,45 @@ public class ReaderSmokeTest extends Instrumentation {
         runOnMainSync(restored::onBackPressed);
         awaitField(restored, "librarySearch");
         runOnMainSync(restored::finish);
+        chromeVisualCheck();
+    }
+    private void chromeVisualCheck() throws Exception {
+        Context context = getTargetContext();
+        var prefs = context.getSharedPreferences("reader", 0);
+        String oldOptions = prefs.getString("options", "{}");
+        try {
+            for (int scenario = 0; scenario < 4; scenario++) {
+                int theme = scenario % 2 == 0 ? 0 : 2;
+                shell("wm size " + (scenario == 3 ? "740x360" : "430x932"));
+                shell("settings put system font_scale " + (scenario >= 2 ? "2.0" : "1.0"));
+                shell("settings put global animator_duration_scale " + (scenario >= 2 ? "0" : "1"));
+                prefs.edit().putString("options", "{\"theme\":" + theme + "}").commit();
+                MainActivity library = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                try {
+                    awaitField(library, "librarySearch"); waitForIdleSync();
+                    assertChrome(library, (ListView) field(library, "libraryList"));
+                    assertTouchTargets(library.getWindow().getDecorView());
+                    capture("chrome-library-" + scenario);
+                } finally { runOnMainSync(library::finish); }
+                CatalogActivity catalog = (CatalogActivity) startActivitySync(new Intent(context, CatalogActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                try {
+                    waitForIdleSync();
+                    assertTouchTargets(catalog.getWindow().getDecorView());
+                    capture("chrome-catalog-" + scenario);
+                    boolean russian = context.getResources().getConfiguration().getLocales().get(0).getLanguage().equals("ru");
+                    click(catalog, russian ? "Загрузки" : "Downloads");
+                    ViewGroup root = (ViewGroup) field(catalog, "root");
+                    TextView selected = find(root.getChildAt(root.getChildCount() - 1), russian ? "Загрузки" : "Downloads");
+                    if (!(boolean) field(catalog, "downloads") || !selected.isSelected()) throw new AssertionError("Downloads tab did not select");
+                    capture("chrome-downloads-" + scenario);
+                } finally { runOnMainSync(catalog::finish); }
+            }
+        } finally {
+            prefs.edit().putString("options", oldOptions).commit();
+            shell("wm size 430x932");
+            shell("settings put system font_scale 1.0");
+            shell("settings put global animator_duration_scale 1");
+        }
     }
     private void showcase() throws Exception {
         Context context = getTargetContext();
@@ -598,6 +637,7 @@ public class ReaderSmokeTest extends Instrumentation {
                 MainActivity current = screen;
                 ListView list = (ListView) field(current, "libraryList");
                 runOnMainSync(() -> list.setSelectionFromTop(2, -24)); waitForIdleSync();
+                assertChrome(current, list);
                 int columns = (int) call(field(current, "adapter"), "columns");
                 int width = context.getResources().getConfiguration().screenWidthDp;
                 if (width >= 720 && columns < 4 || width < 500 && columns != 2) throw new AssertionError("Adaptive grid: " + width + " / " + columns);
@@ -631,6 +671,7 @@ public class ReaderSmokeTest extends Instrumentation {
                 ((EditText) field(initial, "input")).setText("Черновик запроса");
                 ((ListView) field(initial, "resultsList")).setSelectionFromTop(4, -20);
             }); waitForIdleSync();
+            assertChrome(initial, (ListView) field(initial, "resultsList"));
             capture("adaptive-catalog-wide");
             ActivityMonitor monitor = addMonitor(CatalogActivity.class.getName(), null, false);
             shell("wm size 360x840"); catalog = (CatalogActivity) waitForMonitorWithTimeout(monitor, 5000); removeMonitor(monitor); waitForIdleSync();
@@ -679,6 +720,20 @@ public class ReaderSmokeTest extends Instrumentation {
     private Object call(Object object, String method) {
         try { var member = object.getClass().getDeclaredMethod(method); member.setAccessible(true); return member.invoke(object); }
         catch (Exception error) { throw new RuntimeException(error); }
+    }
+    private void assertChrome(Activity activity, ListView list) {
+        runOnMainSync(() -> {
+            TextView brand = find(activity.getWindow().getDecorView(), "MJ / READER");
+            android.graphics.Rect visible = new android.graphics.Rect();
+            if (brand == null || !brand.getGlobalVisibleRect(visible) || visible.height() < brand.getHeight())
+                throw new AssertionError("Masthead scrolled away");
+            int[] top = new int[2], body = new int[2], bottom = new int[2];
+            brand.getLocationOnScreen(top); list.getLocationOnScreen(body);
+            ViewGroup root = (ViewGroup) field(activity, "root");
+            View dock = root.getChildAt(root.getChildCount() - 1); dock.getLocationOnScreen(bottom);
+            if (body[1] < top[1] + brand.getHeight() || body[1] + list.getHeight() >= bottom[1])
+                throw new AssertionError("Content overlaps masthead or bottom actions");
+        });
     }
     private void assertTouchTargets(View view) {
         if (view instanceof Button && view.isShown() && (view.getWidth() + 1 < 48 * view.getResources().getDisplayMetrics().density

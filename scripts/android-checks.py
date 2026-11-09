@@ -68,7 +68,7 @@ def main():
             ET.SubElement(case, 'system-out').text = output
             (args.reports / f'{suite}.log').write_text(output)
             try:
-                names = run('exec-out', 'run-as', 'com.mjreader', 'ls', 'files').stdout.splitlines()
+                names = run('exec-out', 'run-as', 'com.mjreader', 'ls', '-1', 'files').stdout.splitlines()
                 directory = args.reports / 'screenshots' / suite
                 directory.mkdir(parents=True, exist_ok=True)
                 for name in names:

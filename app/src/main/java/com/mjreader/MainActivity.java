@@ -264,6 +264,9 @@ public class MainActivity extends Activity {
         mast.addView(brand, new LinearLayout.LayoutParams(0, -2, 1));
         mast.addView(readerAction("settings", tr("Настройки", "Settings"), () -> settings(false)), new LinearLayout.LayoutParams(dp(48), dp(48)));
         root.addView(mast);
+        View mastDivider = new View(this);
+        mastDivider.setBackgroundColor(options.surface());
+        root.addView(mastDivider, new LinearLayout.LayoutParams(-1, dp(1)));
         boolean compact = getResources().getConfiguration().screenHeightDp < 600;
         gap(root, compact ? 4 : 12);
         LinearLayout heading = row();
@@ -296,9 +299,9 @@ public class MainActivity extends Activity {
         libraryList.setItemsCanFocus(true);
         libraryList.setClipToPadding(false);
         LinearLayout libraryHeader = column();
-        while (root.getChildCount() > 0) {
-            View child = root.getChildAt(0);
-            root.removeViewAt(0);
+        while (root.getChildCount() > 2) {
+            View child = root.getChildAt(2);
+            root.removeViewAt(2);
             libraryHeader.addView(child);
         }
         libraryList.addHeaderView(libraryHeader, null, false);
@@ -336,9 +339,13 @@ public class MainActivity extends Activity {
         Button add = button(importing ? tr("Импортируем…", "Importing…") : getString(R.string.add_book), true, this::pickBooks);
         add.setEnabled(!importing);
         LinearLayout dock = row();
+        dock.setPadding(dp(8), dp(8), dp(8), dp(8));
+        dock.setBackground(shape(options.surface(), 20));
         dock.addView(add, weight()); space(dock);
         dock.addView(button(tr("Найти книги", "Discover"), false, () -> startActivityForResult(new Intent(this, CatalogActivity.class), 8)), weight());
-        root.addView(dock, matchWrap());
+        LinearLayout.LayoutParams dockParams = matchWrap();
+        dockParams.topMargin = dp(12);
+        root.addView(dock, dockParams);
     }
     private String filterLabel() {
         return switch (filter) {
