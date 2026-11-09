@@ -1,0 +1,17 @@
+<resources>
+    <string name="library">Library</string>
+    <string name="add_book">Add book</string>
+    <string name="demo_author">MJReader original</string>
+    <string name="importing">Opening book…</string>
+    <string name="back">Back to library</string>
+    <string name="reader">Text</string>
+    <string name="focus_label">FOCUS MODE</string>
+    <string name="previous_page">Previous page</string>
+    <string name="next_page">Next page</string>
+    <string name="start">Start</string>
+    <string name="pause">Pause</string>
+    <string name="restart">Read again</string>
+    <string name="speed">READING SPEED</string>
+    <string name="wpm">%1$d wpm</string>
+    <string name="book_progress">Reading position</string>
+</resources>

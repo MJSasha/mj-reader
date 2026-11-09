@@ -1,0 +1,85 @@
+# Testing
+
+## Prerequisites
+
+JDK 17, Python 3.10+, Android SDK Platform 36, Build Tools 35.0.0, platform-tools.
+Use the committed Gradle Wrapper. Set `ANDROID_HOME` (or an untracked `local.properties`).
+
+```sh
+bash scripts/checks.sh
+```
+
+This checks the shared version, the CI result parser, pure-Java RU/EN reading logic,
+compiles app/test APKs and runs Android lint. Lint errors fail the build. The current
+baseline has warnings (localization formatting, tool versions and storage APIs);
+they are not represented as a clean zero-warning result.
+
+## Android suites
+
+The project uses a custom `Instrumentation`, not JUnit's Android runner.
+Install both APKs on a **dedicated Android 16 emulator**:
+
+```sh
+adb -s emulator-5554 install -r app/build/outputs/apk/debug/app-debug.apk
+adb -s emulator-5554 install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+python3 scripts/android-checks.py --device emulator-5554
+```
+
+The script rejects physical devices, selects English for label-based checks and sets
+430×932 dp / density 160 / font scale 1. Tests modify demo-book settings and create
+fixtures. `--reset-app` additionally erases MJReader app data before each suite; CI
+uses it only on the new hosted emulator. Do not use it on an emulator containing books
+you want to keep. There is no implicit device selection.
+
+| Suite | Coverage | External requirements |
+| --- | --- | --- |
+| `smoke` | Batch/invalid imports, TXT encodings, EPUB cover/navigation, duplicates/repair, metadata, collections, reversible deletion, search, bookmarks, RU/EN RSVP, persistence | None |
+| `catalog` | Local HTTPS OPDS, retries/failover, next pages, cover/chapter import, cancellation/retry, background download, keyboard, themes, retained pages | Local test server only |
+| `visual` | Library/settings/dialogs, custom selectors, reachable actions, light/dark, settings restoration | None |
+| `adaptive` | 360/540/740/800/900/1040 dp windows, minor and major resizes, reader position/fullscreen, catalog draft/pages/scroll, control states/targets | Emulator resize permission |
+
+Run a targeted subset with `--suites catalog,adaptive`. Reports are written under
+`dist/reports/android`: plain logs, JUnit XML and screenshots by suite. A missing `PASS:`
+marker is a failure even if `adb` exits zero. CI uploads those reports on failures too.
+
+## Manual and optional checks
+
+- Light and dark independently; also Dusk and Sepia when changing color tokens.
+- Phone portrait, wide Fold/tablet, short landscape, font scale 2 and animations disabled.
+- Actual tap/long press, menu actions, hover/focus, keyboard opening and dismissal.
+- Resize while reading, searching and downloading; preserve user context.
+- A physical Fold is still required to assess the actual hinge/Flex posture and device-specific behavior.
+
+Raw runner examples (for diagnostics; inspect the printed result):
+
+```sh
+adb -s emulator-5554 shell am instrument -w -e catalog true -e live true com.mjreader.test/com.mjreader.ReaderSmokeTest
+adb -s emulator-5554 shell am instrument -w -e visual true com.mjreader.test/com.mjreader.ReaderSmokeTest
+```
+
+`live` checks catalog/navigation availability without downloading an external book.
+It is deliberately not a CI gate. `sample`, `reader` and `benchmark` are local regression
+modes tied to the maintainer's private sample EPUB; that file is not included in this
+repository and those modes are not portable CI suites.
+
+## Documentation screenshots
+
+`-e showcase true` renders copies of the two original stories included in the app,
+with synthetic book metadata. It does not use the maintainer's EPUB. Use a dedicated
+emulator at 430×932 / 160 dpi / font scale 1, with app locale `ru`.
+
+```sh
+adb -s emulator-5554 shell am instrument -w -e showcase true com.mjreader.test/com.mjreader.ReaderSmokeTest
+adb -s emulator-5554 exec-out run-as com.mjreader cat files/qa-showcase-library-dark.png > docs/images/library-dark.png
+```
+
+The other generated names are `library-light`, `reading`, `rsvp`, `settings` and `fold`.
+Review images before committing. The full `dist/` history and personal-book captures
+are intentionally excluded from Git.
+
+## Test certificate
+
+`app/src/androidTest/assets/catalog-test.p12` is a public, localhost-only fixture with
+the test password `test-only`. It is not a signing credential. The test temporarily
+trusts that server in its own process, restores the previous factory and cleans up.
+Release packaging explicitly rejects `.p12`, signing files and EPUB files in the APK.

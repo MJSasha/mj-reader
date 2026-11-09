@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="460" viewBox="0 0 1600 460" role="img" aria-labelledby="title desc">
+  <title id="title">MJReader — пространство для чтения</title>
+  <desc id="desc">Нативная Android-читалка. EPUB, TXT, RSVP на русском и английском.</desc>
+  <defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#191e29"/><stop offset="1" stop-color="#0c0e15"/></linearGradient></defs>
+  <rect width="1600" height="460" rx="32" fill="url(#bg)"/>
+  <g fill="none" stroke="#c7ff68" opacity=".18"><circle cx="1380" cy="220" r="300"/><circle cx="1380" cy="220" r="234"/><circle cx="1380" cy="220" r="168"/></g>
+  <text x="86" y="92" font-family="sans-serif" font-size="20" letter-spacing="6" fill="#c7ff68">MJ / READER</text>
+  <text x="80" y="218" font-family="sans-serif" font-size="76" font-weight="700" letter-spacing="-2" fill="#f0f2ec">Пространство для чтения.</text>
+  <text x="86" y="283" font-family="sans-serif" font-size="30" fill="#abb5c5">Ваши книги. Ваш ритм. Ваше оформление.</text>
+  <g font-family="sans-serif" font-size="19" fill="#c7ff68"><text x="86" y="380">ANDROID NATIVE</text><text x="345" y="380">EPUB + TXT</text><text x="550" y="380">RSVP · RU / EN</text><text x="800" y="380">FOLD READY</text></g>
+  <g transform="translate(1300 124)" fill="#191e29" stroke="#c7ff68" stroke-width="5" stroke-linejoin="round">
+    <path d="M0 15Q45 0 80 22V160Q45 138 0 153Z"/><path d="M80 22Q115 0 160 15V153Q115 138 80 160Z"/>
+    <path d="M22 51Q42 45 60 53M22 77Q42 71 60 79M101 53Q120 45 139 51M101 79Q120 71 139 77" stroke-width="3"/>
+  </g>
+</svg>

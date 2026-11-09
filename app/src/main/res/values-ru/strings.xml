@@ -1,0 +1,17 @@
+<resources>
+    <string name="library">Библиотека</string>
+    <string name="add_book">Добавить книгу</string>
+    <string name="demo_author">Рассказ MJReader</string>
+    <string name="importing">Открываем книгу…</string>
+    <string name="back">Назад в библиотеку</string>
+    <string name="reader">Текст</string>
+    <string name="focus_label">РЕЖИМ ФОКУСА</string>
+    <string name="previous_page">Предыдущая страница</string>
+    <string name="next_page">Следующая страница</string>
+    <string name="start">Старт</string>
+    <string name="pause">Пауза</string>
+    <string name="restart">С начала</string>
+    <string name="speed">СКОРОСТЬ ЧТЕНИЯ</string>
+    <string name="wpm">%1$d сл/мин</string>
+    <string name="book_progress">Позиция чтения</string>
+</resources>

@@ -1,0 +1,27 @@
+name: Ошибка
+description: Проблема с чтением, импортом или интерфейсом
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Что произошло и чего ожидали?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги для повторения
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Версия MJReader, Android и модель устройства
+      placeholder: 0.8.1 / Android 16 / Fold, раскрытый экран
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Дополнительные сведения
+      description: Тема, размер шрифта, формат книги, безопасный пример или скриншот. Не публикуйте приватные данные и полные файлы чужих книг.

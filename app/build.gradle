@@ -1,0 +1,48 @@
+plugins {
+    id 'com.android.application' version '8.13.2'
+}
+def releaseVersion = new Properties()
+rootProject.file('version.properties').withInputStream { releaseVersion.load(it) }
+def signingNames = ['ANDROID_KEYSTORE_PATH', 'ANDROID_KEYSTORE_PASSWORD', 'ANDROID_KEY_ALIAS', 'ANDROID_KEY_PASSWORD']
+def signingValues = signingNames.collectEntries { [(it): System.getenv(it)] }
+if (signingValues.values().any { it } && !signingValues.values().every { it }) {
+    throw new GradleException('Set all four Android signing environment variables; see docs/RELEASING.md')
+}
+
+android {
+    namespace 'com.mjreader'
+    compileSdk 36
+    buildToolsVersion '35.0.0'
+
+    defaultConfig {
+        applicationId 'com.mjreader'
+        minSdk 26
+        targetSdk 36
+        versionCode releaseVersion.getProperty('VERSION_CODE').toInteger()
+        versionName releaseVersion.getProperty('VERSION_NAME')
+        testInstrumentationRunner 'com.mjreader.ReaderSmokeTest'
+    }
+
+    signingConfigs {
+        if (signingValues.ANDROID_KEYSTORE_PATH) {
+            release {
+                storeFile file(signingValues.ANDROID_KEYSTORE_PATH)
+                storePassword signingValues.ANDROID_KEYSTORE_PASSWORD
+                keyAlias signingValues.ANDROID_KEY_ALIAS
+                keyPassword signingValues.ANDROID_KEY_PASSWORD
+            }
+        }
+    }
+    buildTypes {
+        release {
+            debuggable false
+            minifyEnabled false
+            if (signingValues.ANDROID_KEYSTORE_PATH) signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
