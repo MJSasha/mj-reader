@@ -26,7 +26,8 @@ python3 scripts/android-checks.py --device emulator-5554
 ```
 
 The script rejects physical devices, selects English for label-based checks and sets
-430×932 dp / density 160 / font scale 1. Tests modify demo-book settings and create
+430×932 dp / density 160 / font scale 1, with the software keyboard enabled even when
+the emulator exposes a hardware keyboard. Tests modify demo-book settings and create
 fixtures. `--reset-app` additionally erases MJReader app data before each suite; CI
 uses it only on the new hosted emulator. Do not use it on an emulator containing books
 you want to keep. There is no implicit device selection.

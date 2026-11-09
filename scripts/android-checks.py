@@ -48,6 +48,7 @@ def main():
             run('shell', 'wm', 'size', '430x932')
             run('shell', 'wm', 'density', '160')
             run('shell', 'settings', 'put', 'system', 'font_scale', '1.0')
+            run('shell', 'settings', 'put', 'secure', 'show_ime_with_hard_keyboard', '1')
             run('shell', 'settings', 'put', 'global', 'animator_duration_scale', '1')
             run('shell', 'cmd', 'locale', 'set-app-locales', 'com.mjreader', '--locales', 'en-US')
             command = ['shell', 'am', 'instrument', '-w']

@@ -68,7 +68,17 @@ final class CatalogCheck {
                 EditText input = (EditText) field(screen, "input");
                 test.runOnMainSync(() -> { input.requestFocus(); input.requestRectangleOnScreen(new android.graphics.Rect(0, 0, input.getWidth(), input.getHeight()), true);
                     ((android.view.inputmethod.InputMethodManager) screen.getSystemService(Context.INPUT_METHOD_SERVICE)).showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT); });
-                Thread.sleep(500); require(screen.getWindow().getDecorView().getRootWindowInsets().isVisible(WindowInsets.Type.ime()), "Catalog search keyboard");
+                long keyboardUntil = System.currentTimeMillis() + 5000;
+                boolean[] keyboardVisible = {false};
+                do {
+                    test.runOnMainSync(() -> {
+                        WindowInsets insets = screen.getWindow().getDecorView().getRootWindowInsets();
+                        keyboardVisible[0] = insets != null && insets.isVisible(WindowInsets.Type.ime());
+                    });
+                    if (!keyboardVisible[0]) Thread.sleep(100);
+                } while (!keyboardVisible[0] && System.currentTimeMillis() < keyboardUntil);
+                capture("catalog-keyboard-" + theme);
+                require(keyboardVisible[0], "Catalog search keyboard");
                 test.runOnMainSync(() -> { input.setText("Орбита"); input.onEditorAction(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH); }); awaitUi(screen);
                 require(((List<?>) field(screen, "entries")).size() >= 2, "UI search results");
                 Object listRoot = field(screen, "root");
