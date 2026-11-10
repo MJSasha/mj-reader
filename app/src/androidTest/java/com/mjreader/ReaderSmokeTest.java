@@ -1211,6 +1211,15 @@ public class ReaderSmokeTest extends Instrumentation {
                 }
                 if (!shown) throw new AssertionError("Footnote tap did not open text in " + paged);
                 capture((paged ? "note-pages-" : "note-scroll-") + theme); clickSystem("OK");
+                // Accessibility clicks finish before the dialog window returns input focus.
+                boolean focused = false;
+                for (int retry = 0; retry < 100 && !focused; retry++) {
+                    boolean[] reading = {false};
+                    runOnMainSync(() -> reading[0] = active.getWindow().getDecorView().hasWindowFocus());
+                    focused = reading[0];
+                    if (!focused) Thread.sleep(50);
+                }
+                if (!focused) throw new AssertionError("Reader did not regain focus after closing the note");
                 if ((int) field(screen, "anchor") != anchor || (boolean) field(screen, "fullscreen")) throw new AssertionError("Note changed reading position/panels");
             }
             runOnMainSync(() -> {
