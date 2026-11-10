@@ -10,6 +10,7 @@ Compose, a database library or a torrent runtime. It is a single `:app` Gradle m
 | `MainActivity` | Library, book actions, text reader, RSVP, per-book/global settings | UI thread owns route state; worker handles import/open |
 | `Books` | EPUB/FB2/TXT decoding, deduplication, metadata repair and private JSON files | Serialized import; stable ID/full-text offsets |
 | `Fb2` | FictionBook metadata, body/notes, chapters and embedded raster assets | Shared protected XML parser; original full-text offsets |
+| `BookNotes` | Local EPUB anchor targets and bounded footnote text | No network access; retained original text offsets |
 | `EpubCover` | EPUB cover candidates, wrappers and raster decoding | Bounded input; no remote image fetch |
 | `ReadingText` | RU/EN word boundaries, offsets, RSVP delay | Pure Java; checked on the host JVM |
 | `ReaderText` | Chapter/paragraph/image spans and an approximately 18k-character window | Window-relative UI offsets map back to full text |
@@ -41,7 +42,7 @@ flowchart LR
 ## Storage
 
 - `files/books/<id>.json`: title, author, full normalized text, chapter anchors,
-  optional base64 raster cover, deduplicated inline image assets and full-text image positions, fingerprint. No external storage permission is required.
+  optional base64 raster cover, deduplicated inline image assets, footnote ranges/text and full-text image positions, fingerprint. No external storage permission is required.
 - SharedPreferences `reader`: global JSON `options`, optional `options.<bookId>`,
   book metadata/status, full-text anchors, bookmarks, collections, catalog configuration.
 - `files/downloads/<url-sha256>/job.json`: transfer state/progress, source URL, book ID.
@@ -49,8 +50,8 @@ flowchart LR
 - Deleting a book in the UI is reversible; it changes the library filter/state.
   Uninstalling the app removes its private data. There is no cloud sync or export backup yet.
 
-EPUB cover/navigation/illustration repair may enrich an existing entry. Older imports
-did not retain inline images, so restoring them requires reimporting the original EPUB. It must not replace the
+EPUB/FB2 cover/navigation/illustration/footnote repair may enrich an existing entry. Older imports
+did not retain inline images, so restoring them requires reimporting the original book. It must not replace the
 original text or reset identity just because better metadata became available.
 
 ## UI and window changes
@@ -75,12 +76,14 @@ Catalog reads use HTTPS with certificate verification. OPDS input is bounded and
 using the shared XML protections. Only explicit EPUB/FB2/TXT acquisition links can be downloaded.
 The parser never executes a catalog page or book script.
 
-Known/user-validated mirrors participate in automatic fallback. Transient failures retry
-up to three rounds with backoff and a 40-second scheduling budget; an in-flight request
-can finish after that budget. Permanent HTTP/XML errors do not retry the same mirror.
+Known/user-validated mirrors participate in automatic fallback. Catalog requests give the preferred
+mirror a 600 ms head start, then race at most two requests; the first valid feed wins.
+A 20-second scheduling budget bounds three retry rounds. Cancellation disconnects active
+connections, freeing the catalog worker for a new search. Eight feeds are cached for 20 seconds
+by exact URL. Permanent HTTP/XML errors do not retry the same mirror.
 Live availability is not guaranteed by a successful previous check.
 
-Downloads are serialized, capped at 32 MB and persisted. Retry restarts the file from zero;
+Downloads are serialized, capped at 32 MB and persisted. Up to three automatic attempts recover transient network errors and truncated streams, switching known mirror origins. Each attempt restarts the file from zero;
 HTTP Range resume is not implemented. Process interruption is shown in the downloads UI
 and requires user retry. A completed import notifies the visible library by local broadcast.
 
@@ -89,3 +92,5 @@ and requires user retry. A completed import notifies the visible library by loca
 Prefer the platform/standard library or existing helpers. Add a dependency only for a
 concrete requirement. Keep parser, presentation and transfer responsibilities in their
 current owners; a UI cleanup should not rewrite storage or change the signing identity.
+
+Android VIEW/SEND content URIs use the existing background import queue; duplicates open the stored book ID. Pending URIs survive Activity recreation. Footnote taps take precedence over edge navigation, open the existing themed dialog, and never change the reader anchor. Screen readers expose footnotes as custom actions.

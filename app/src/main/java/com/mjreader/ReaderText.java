@@ -49,7 +49,29 @@ final class ReaderText {
             for (int i = start; i < end; i++) if (!Character.isWhitespace(value.charAt(i))) { blank = false; break; }
             if (blank) { fm.ascent = -paragraphGap; fm.top = -paragraphGap; fm.descent = 0; fm.bottom = 0; }
         }, 0, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        for (Books.Note note : book.notes()) {
+            int start = Math.max(from, note.start()) - from, end = Math.min(to, note.end()) - from;
+            if (end > start) {
+                text.setSpan(new ForegroundColorSpan(options.accent()), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                text.setSpan(new UnderlineSpan(), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+        }
         return text;
+    }
+    static int hit(Layout layout, float x, float y) {
+        if (layout == null || y < 0 || y >= layout.getHeight()) return -1;
+        int line = layout.getLineForVertical((int) y);
+        if (x < layout.getLineLeft(line) || x > layout.getLineRight(line)) return -1;
+        return layout.getOffsetForHorizontal(line, x);
+    }
+    static final int NOTE_ACTION = 0x01000000;
+    static void noteActions(Books.Book book, android.view.accessibility.AccessibilityNodeInfo info, int from, int to) {
+        for (int i = 0; i < book.notes().size(); i++) {
+            Books.Note note = book.notes().get(i);
+            if (note.start() < to && note.end() > from)
+                info.addAction(new android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction(NOTE_ACTION + i,
+                        book.text().substring(note.start(), note.end())));
+        }
     }
 
     /** Sizing uses image headers only; pixels are decoded for visible pages on the worker. */

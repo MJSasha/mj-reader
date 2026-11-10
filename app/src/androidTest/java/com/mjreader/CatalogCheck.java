@@ -19,6 +19,8 @@ import java.util.zip.*;
 final class CatalogCheck {
     private final Instrumentation test;
     private final Context context;
+    private final java.util.concurrent.atomic.AtomicInteger brokenTransfers = new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger slowCatalog = new java.util.concurrent.atomic.AtomicInteger();
     private final java.util.concurrent.atomic.AtomicInteger transientRequests = new java.util.concurrent.atomic.AtomicInteger();
     CatalogCheck(Instrumentation test) { this.test = test; context = test.getTargetContext(); }
     void run(boolean live) throws Exception {
@@ -46,12 +48,22 @@ final class CatalogCheck {
             var mirrorPrefs = context.getSharedPreferences("qa-mirrors", 0);
             mirrorPrefs.edit().putString("catalog.mirrors", origin + "/good/opds\nhttp://invalid.test/opds\n" + origin + "/good/opds")
                     .putString("catalog.last", origin + "/good/opds").commit();
-            require(Flibusta.mirrors(mirrorPrefs).size() == 3 && Flibusta.mirrors(mirrorPrefs).get(0).equals(origin + "/good/opds"), "Validated mirror list deduplication and preference");
+            require(Flibusta.mirrors(mirrorPrefs).size() == Flibusta.MIRRORS.size() + 1 && Flibusta.mirrors(mirrorPrefs).get(0).equals(origin + "/good/opds"), "Validated mirror list deduplication and preference");
             mirrorPrefs.edit().clear().commit();
             var failover = Flibusta.loadMirrors(origin + "/bad/opds/search?searchTerm=test", Arrays.asList(origin + "/bad/opds", origin + "/good/opds"));
             require(failover.base().endsWith("/good/opds") && failover.feed().entries().size() == 2, "Automatic mirror failover");
             var retried = Flibusta.loadMirrors(origin + "/flaky/opds", Collections.singletonList(origin + "/flaky/opds"));
             require(transientRequests.get() == 3 && !retried.feed().entries().isEmpty(), "Bounded HTTP 503 retries");
+            long started = android.os.SystemClock.elapsedRealtime();
+            var fast = Flibusta.loadMirrors(origin + "/stall/opds/search?searchTerm=hedge", List.of(origin + "/stall/opds", origin + "/good/opds"));
+            require(fast.base().endsWith("/good/opds") && android.os.SystemClock.elapsedRealtime() - started < 3500, "Slow mirror must not delay healthy fallback");
+            var executor = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> cancelled = executor.submit(() -> { try { Flibusta.loadMirrors(origin + "/stall/opds", List.of(origin + "/stall/opds")); } catch (Exception ignored) { } });
+                Thread.sleep(200); cancelled.cancel(true);
+                require(executor.submit(() -> true).get(2, TimeUnit.SECONDS), "Cancelled catalog request releases its worker");
+            } finally { executor.shutdownNow(); }
+            require(Flibusta.bookUrls("https://unrelated.test/book.epub", Flibusta.MIRRORS).size() == 1, "Never remap unrelated book hosts");
             var first = failover.feed().entries().get(0);
             require(first.book() && first.format().equals("epub") && first.author().equals("MJReader"), "OPDS EPUB preference and author");
             Flibusta.Entry fb2Entry = null;
@@ -133,6 +145,12 @@ final class CatalogCheck {
                     String bookId = complete.getString("book"); imported.add(bookId);
                     Books.Book book = new Books(context).list().stream().filter(b -> b.id().equals(bookId)).findFirst().orElseThrow();
                     require(book.title().equals("Орбита из каталога") && book.chapters().size() == 2 && book.cover() != null, "EPUB title, cover and chapters imported");
+                    var broken = new Flibusta.Entry("Broken transfer", "", "", origin + "/broken.txt", "txt", true);
+                    String brokenId = BookDownloads.create(context, broken); jobs.add(brokenId);
+                    test.runOnMainSync(() -> BookDownloadService.command(context, "start", brokenId));
+                    JSONObject recovered = waitState(brokenId, "complete", 20000); imported.add(recovered.getString("book"));
+                    require(brokenTransfers.get() == 2 && new Books(context).list().stream().anyMatch(b -> b.id().equals(recovered.optString("book"))
+                            && b.text().equals("The lighthouse transfer recovered.")), "Truncated transfer retries from zero without duplicated bytes");
                     String fb2Id = BookDownloads.create(context, fb2Entry); jobs.add(fb2Id);
                     test.runOnMainSync(() -> BookDownloadService.command(context, "start", fb2Id));
                     JSONObject fb2Complete = waitState(fb2Id, "complete", 20000); imported.add(fb2Complete.getString("book"));
@@ -174,10 +192,12 @@ final class CatalogCheck {
         try (socket) {
             BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII)); String line = reader.readLine();
             if (line == null) return; String path = line.split(" ")[1]; while ((line = reader.readLine()) != null && !line.isEmpty()) { }
+            if (path.startsWith("/stall/")) { slowCatalog.incrementAndGet(); Thread.sleep(5000); }
             int status = path.startsWith("/bad/") || path.startsWith("/flaky/") && transientRequests.getAndIncrement() < 2 ? 503 : 200;
-            byte[] data = path.equals("/book.fb2") ? fb2() : path.equals("/book.epub") ? epub : path.equals("/slow.txt") ? slow : feed(origin, path.contains("page=2")).getBytes(StandardCharsets.UTF_8);
+            byte[] data = path.equals("/broken.txt") ? "The lighthouse transfer recovered.".getBytes(StandardCharsets.UTF_8) : path.equals("/book.fb2") ? fb2() : path.equals("/book.epub") ? epub : path.equals("/slow.txt") ? slow : feed(origin, path.contains("page=2")).getBytes(StandardCharsets.UTF_8);
             String mime = path.endsWith("fb2") ? "application/fb2+zip" : path.endsWith("epub") ? "application/epub+zip" : path.endsWith("txt") ? "text/plain" : "application/atom+xml";
             OutputStream output = socket.getOutputStream(); output.write(("HTTP/1.1 " + status + " Test\r\nContent-Type: " + mime + "\r\nContent-Length: " + data.length + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            if (path.equals("/broken.txt") && brokenTransfers.getAndIncrement() == 0) { output.write(data, 0, 5); output.flush(); return; }
             for (int pos = 0; pos < data.length; pos += 4096) { output.write(data, pos, Math.min(4096, data.length - pos)); output.flush(); if (path.equals("/slow.txt")) Thread.sleep(25); }
         } catch (Exception ignored) { }
     }

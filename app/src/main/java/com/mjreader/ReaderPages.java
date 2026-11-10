@@ -18,6 +18,7 @@ final class ReaderPages extends View {
     private final Executor worker;
     private final BiFunction<Integer, Integer, SpannableString> style;
     private final IntConsumer moved;
+    private final IntPredicate note;
     private final GestureDetector gestures;
     private final ArrayDeque<Integer> history = new ArrayDeque<>();
     private final TextPaint paint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
@@ -30,9 +31,10 @@ final class ReaderPages extends View {
 
     ReaderPages(Context context, Books.Book book, ReaderOptions options, int anchor, Executor worker,
                 BiFunction<Integer, Integer, SpannableString> style, IntConsumer moved,
-                IntConsumer paragraph, Runnable center) {
+                IntConsumer paragraph, IntPredicate note, Runnable center) {
         super(context);
         this.book = book; this.options = options; this.anchor = anchor; this.end = anchor;
+        this.note = note;
         this.worker = worker; this.style = style; this.moved = moved;
         paint.setColor(options.ink());
         paint.setTextSize(options.number("size", 21) * getResources().getDisplayMetrics().scaledDensity);
@@ -44,6 +46,8 @@ final class ReaderPages extends View {
         gestures = new GestureDetector(context, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onDown(MotionEvent event) { return true; }
             @Override public boolean onSingleTapUp(MotionEvent event) {
+                if (!ready()) return true;
+                if (note.test(noteOffsetAt(event.getX(), event.getY()))) return true;
                 if (event.getX() < getWidth() * .25f) turn(-1);
                 else if (event.getX() > getWidth() * .75f) turn(1);
                 else performClick();
@@ -211,6 +215,14 @@ final class ReaderPages extends View {
             canvas.restoreToCount(saved);
         }
     }
+    private int noteOffsetAt(float x, float y) {
+        int stride = pageWidth() + margin() * 2 + dp(32);
+        int index = Math.max(0, (int) x / stride);
+        if (index >= pages.size()) return -1;
+        Page page = pages.get(index);
+        int offset = ReaderText.hit(page.layout(), x - index * stride - margin(), y - dp(12) + page.top());
+        return offset < 0 || page.sourceStart() + offset >= page.end() ? -1 : page.sourceStart() + offset;
+    }
     private int offsetAt(float x, float y) {
         if (pages.isEmpty()) return anchor;
         int stride = pageWidth() + margin() * 2 + dp(32);
@@ -222,10 +234,13 @@ final class ReaderPages extends View {
     @Override public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
         super.onInitializeAccessibilityNodeInfo(info);
         info.setClassName("android.widget.TextView"); info.setScrollable(true);
+        ReaderText.noteActions(book, info, anchor, end);
         if (anchor > 0) info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_BACKWARD);
         if (end < book.text().length()) info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD);
     }
     @Override public boolean performAccessibilityAction(int action, Bundle arguments) {
+        int index = action - ReaderText.NOTE_ACTION;
+        if (index >= 0 && index < book.notes().size()) return note.test(book.notes().get(index).start());
         if (action == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) { turn(1); return true; }
         if (action == AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD) { turn(-1); return true; }
         return super.performAccessibilityAction(action, arguments);

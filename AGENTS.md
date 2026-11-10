@@ -31,7 +31,7 @@ Read this file first, then only the docs and classes relevant to the task.
 | Shared colors, press/hover/focus, window changes | `ReaderOptions.java` |
 | Menus, modal layout, keyboard | `ReaderDialogs.java` |
 | Outline icons | `ReaderIcon.java` |
-| EPUB/FB2/TXT import, stored book JSON | `Books.java`, `Fb2.java`, `EpubCover.java` |
+| EPUB/FB2/TXT import, stored book JSON | `Books.java`, `Fb2.java`, `BookNotes.java`, `EpubCover.java` |
 | Tokenization and positions | `ReadingText.java` |
 | Paragraph spans and bounded text windows | `ReaderText.java` |
 | OPDS search, mirror validation and retries | `Flibusta.java` |

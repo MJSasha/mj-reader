@@ -69,9 +69,42 @@ public class BookDownloadService extends Service {
             if (directory.getUsableSpace() < 64_000_000) throw new IOException("Недостаточно места / Not enough space");
             job.put("state", "downloading").put("done", 0).put("total", -1).put("error", ""); BookDownloads.save(this, job);
             getSystemService(NotificationManager.class).notify(26, notification(job.getString("title"), true));
-            HttpURLConnection connection = Flibusta.openBook(job.getString("url"), getSharedPreferences("reader", 0).getString("catalog", "auto").equals("auto") ? Flibusta.mirrors(getSharedPreferences("reader", 0)) : Collections.emptyList(), c -> { transfer.connection = c; transfer.check(); });
+            temporary = transferFile(job, directory, transfer);
+            long done = temporary.length();
+            String format = job.getString("format");
+            if (!format.equals("epub") && !format.equals("txt") && !format.equals("fb2")) throw new IOException("Unsupported format");
+            String name = job.optString("title", "Book").replaceAll("[\\p{Cntrl}/\\\\]", " ").trim();
+            if (name.isEmpty()) name = "Book";
+            int end = Math.min(60, name.length());
+            if (Character.isHighSurrogate(name.charAt(end - 1))) end--;
+            File book = new File(directory, name.substring(0, end) + "." + format);
+            Files.move(temporary.toPath(), book.toPath(), StandardCopyOption.REPLACE_EXISTING); temporary = null;
+            job.put("state", "importing").put("done", done).put("total", done).put("rate", 0); BookDownloads.save(this, job);
+            transfer.check();
+            try { job.put("book", new Books(this).importBook(book).id()); }
+            catch (Books.DuplicateBook ignored) { job.put("duplicate", true); }
+            job.put("state", "complete"); BookDownloads.save(this, job);
+            // The library is the durable copy; completed network payloads need no second copy.
+            Files.deleteIfExists(book.toPath());
+            sendBroadcast(new Intent(getPackageName() + ".BOOKS_IMPORTED").setPackage(getPackageName()));
+            getSystemService(NotificationManager.class).notify(id.hashCode(), notification(tr("Добавлено в библиотеку: ", "Added to library: ") + job.getString("title"), false));
+        } catch (Exception error) {
+            try { JSONObject job = BookDownloads.get(this, id); job.put("state", transfer.cancelled || closing ? "cancelled" : "error").put("rate", 0).put("error", Objects.toString(error.getMessage(), error.toString())); BookDownloads.save(this, job); }
+            catch (Exception ignored) { android.util.Log.e("MJDownload", "Save download error", error); }
+        } finally {
+            if (temporary != null) try { Files.deleteIfExists(temporary.toPath()); } catch (IOException ignored) { }
+        }
+    }
+    private File transferFile(JSONObject job, File directory, Transfer transfer) throws Exception {
+        List<String> mirrors = getSharedPreferences("reader", 0).getString("catalog", "auto").equals("auto")
+                ? Flibusta.mirrors(getSharedPreferences("reader", 0)) : Collections.emptyList();
+        List<String> urls = Flibusta.bookUrls(job.getString("url"), mirrors);
+        for (int attempt = 0; ; attempt++) {
+            transfer.check();
+            HttpURLConnection connection = null; File temporary = null;
             try {
-                transfer.check();
+                job.put("done", 0).put("total", -1).put("rate", 0); BookDownloads.save(this, job);
+                connection = Flibusta.open(urls.get(attempt % urls.size()), c -> { transfer.connection = c; transfer.check(); });
                 long total = connection.getContentLengthLong();
                 if (total > Flibusta.BOOK_LIMIT) throw new IOException("Книга больше 32 МБ / Book exceeds 32 MB");
                 String mime = Objects.toString(connection.getContentType(), "").toLowerCase(Locale.ROOT);
@@ -80,43 +113,30 @@ public class BookDownloadService extends Service {
                 temporary = File.createTempFile("book-", ".part", directory);
                 long done = 0, last = android.os.SystemClock.elapsedRealtime(), lastBytes = 0;
                 try (InputStream input = connection.getInputStream(); FileOutputStream output = new FileOutputStream(temporary)) {
-                    byte[] buffer = new byte[16384]; int count;
+                    byte[] buffer = new byte[32768]; int count;
                     while ((count = input.read(buffer)) != -1) {
                         transfer.check();
                         if (count > Flibusta.BOOK_LIMIT - done) throw new IOException("Книга больше 32 МБ / Book exceeds 32 MB");
                         output.write(buffer, 0, count); done += count;
                         long now = android.os.SystemClock.elapsedRealtime();
                         if (now - last >= 500) {
-                            job.put("done", done).put("rate", (done - lastBytes) * 1000 / Math.max(1, now - last)); BookDownloads.save(this, job); last = now; lastBytes = done;
+                            job.put("done", done).put("rate", (done - lastBytes) * 1000 / Math.max(1, now - last));
+                            BookDownloads.save(this, job); last = now; lastBytes = done;
                         }
                     }
                     output.getFD().sync();
                 }
                 transfer.check();
-                if (done == 0 || (total >= 0 && done != total)) throw new IOException("Книга скачалась не полностью / Incomplete download");
-                String format = job.getString("format");
-                if (!format.equals("epub") && !format.equals("txt") && !format.equals("fb2")) throw new IOException("Unsupported format");
-                String name = job.optString("title", "Book").replaceAll("[\\p{Cntrl}/\\\\]", " ").trim();
-                if (name.isEmpty()) name = "Book";
-                int end = Math.min(60, name.length());
-                if (Character.isHighSurrogate(name.charAt(end - 1))) end--;
-                File book = new File(directory, name.substring(0, end) + "." + format);
-                Files.move(temporary.toPath(), book.toPath(), StandardCopyOption.REPLACE_EXISTING); temporary = null;
-                job.put("state", "importing").put("done", done).put("total", done).put("rate", 0); BookDownloads.save(this, job);
+                if (done == 0 || (total >= 0 && done != total)) throw new EOFException("Неполная загрузка / Incomplete download");
+                File complete = temporary; temporary = null; return complete;
+            } catch (IOException error) {
                 transfer.check();
-                try { job.put("book", new Books(this).importBook(book).id()); }
-                catch (Books.DuplicateBook ignored) { job.put("duplicate", true); }
-                job.put("state", "complete"); BookDownloads.save(this, job);
-                // The library is the durable copy; completed network payloads need no second copy.
-                Files.deleteIfExists(book.toPath());
-                sendBroadcast(new Intent(getPackageName() + ".BOOKS_IMPORTED").setPackage(getPackageName()));
-                getSystemService(NotificationManager.class).notify(id.hashCode(), notification(tr("Добавлено в библиотеку: ", "Added to library: ") + job.getString("title"), false));
-            } finally { connection.disconnect(); transfer.connection = null; }
-        } catch (Exception error) {
-            try { JSONObject job = BookDownloads.get(this, id); job.put("state", transfer.cancelled || closing ? "cancelled" : "error").put("rate", 0).put("error", Objects.toString(error.getMessage(), error.toString())); BookDownloads.save(this, job); }
-            catch (Exception ignored) { android.util.Log.e("MJDownload", "Save download error", error); }
-        } finally {
-            if (temporary != null) try { Files.deleteIfExists(temporary.toPath()); } catch (IOException ignored) { }
+                if (attempt >= 2 || (!Flibusta.retryable(error) && !(attempt + 1 < urls.size() && error instanceof Flibusta.HttpError))) throw error;
+                Thread.sleep(300L * (attempt + 1));
+            } finally {
+                if (connection != null) connection.disconnect(); transfer.connection = null;
+                if (temporary != null) Files.deleteIfExists(temporary.toPath());
+            }
         }
     }
     private Notification notification(String text, boolean ongoing) {

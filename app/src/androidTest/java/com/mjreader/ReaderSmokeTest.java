@@ -79,6 +79,7 @@ public class ReaderSmokeTest extends Instrumentation {
             if (epub.text().indexOf("Первая") >= epub.text().indexOf("Вторая")) throw new AssertionError("Spine order");
             verifyCoverVariants(epub.cover());
             fb2Check(store, epub.cover());
+            openingAndNotesCheck(store);
             if (epub.cover() == null || !epub.chapters().get(0).title().equals("Начало")) throw new AssertionError("EPUB cover/navigation");
             if (epub.chapters().size() != 2 || epub.chapters().get(1).offset() <= 0) throw new AssertionError("Chapter positions");
             try { checkImport(store, "duplicate.epub", buffer.toByteArray(), "Первая глава."); throw new AssertionError("Duplicate accepted"); }
@@ -1124,7 +1125,8 @@ public class ReaderSmokeTest extends Instrumentation {
         for (int attempt = 0; attempt < 30; attempt++) {
             AccessibilityNodeInfo root = getUiAutomation().getRootInActiveWindow();
             if (root != null) for (AccessibilityNodeInfo node : root.findAccessibilityNodeInfosByText(text)) {
-                if (node.getText() != null && node.getText().toString().equalsIgnoreCase(text)) {
+                if ((node.getText() != null && node.getText().toString().equalsIgnoreCase(text))
+                        || (node.getContentDescription() != null && node.getContentDescription().toString().equalsIgnoreCase(text))) {
                     while (node != null && !node.isClickable()) node = node.getParent();
                     if (node != null && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
                         waitForIdleSync(); return;
@@ -1143,6 +1145,102 @@ public class ReaderSmokeTest extends Instrumentation {
             if (child != null && scrollSystem(child)) return true;
         }
         return false;
+    }
+    private void openingAndNotesCheck(Books store) throws Exception {
+        Context context = getTargetContext();
+        var prefs = context.getSharedPreferences("reader", 0); String previous = prefs.getString("options", "{}");
+        String fb2 = "<FictionBook xmlns='http://www.gribuser.ru/xml/fictionbook/2.0' xmlns:l='http://www.w3.org/1999/xlink'><description><title-info><book-title>Footnotes FB2</book-title></title-info></description>"
+                + "<body><section><p>Mira saw the light <a l:href='#note-1'>[1]</a> and returned home.</p></section></body>"
+                + "<body name='notes'><section id='note-1'><title><p>1</p></title><p>The original lighthouse note.</p></section></body></FictionBook>";
+        Books.Book fiction = checkImport(store, "notes.fb2", fb2.getBytes(StandardCharsets.UTF_8), "[1]");
+        if (fiction.notes().size() != 1 || !fiction.notes().get(0).text().contains("original lighthouse")
+                || !fiction.text().substring(fiction.notes().get(0).start(), fiction.notes().get(0).end()).equals("[1]")) throw new AssertionError("FB2 footnote offsets");
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
+            entry(zip, "META-INF/container.xml", "<container><rootfiles><rootfile full-path='book.opf'/></rootfiles></container>");
+            entry(zip, "book.opf", "<package><metadata xmlns:dc='http://purl.org/dc/elements/1.1/'><dc:title>Footnotes EPUB</dc:title></metadata><manifest><item id='a' href='a.xhtml'/></manifest><spine><itemref idref='a'/></spine></package>");
+            entry(zip, "a.xhtml", "<html xmlns='http://www.w3.org/1999/xhtml'><body><h1>The lighthouse</h1><p>Mira read <a href='notes.xhtml#n1'>[1]</a> before sunrise.</p><p>" + "A new day at the observatory. ".repeat(150) + "</p></body></html>");
+            entry(zip, "notes.xhtml", "<html xmlns='http://www.w3.org/1999/xhtml'><body><aside id='n1'><p>A star helps Mira find the shore.</p></aside></body></html>");
+        }
+        Uri uri = createDocument("notes.epub", bytes.toByteArray());
+        MainActivity screen = null;
+        try {
+            prefs.edit().putString("options", "{\"pages\":true,\"size\":10}").commit();
+            Intent view = new Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/epub+zip").setPackage(context.getPackageName())
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            if (context.getPackageManager().resolveActivity(view, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY) == null)
+                throw new AssertionError("EPUB Open with handler missing");
+            for (String mime : new String[]{"application/epub+zip", "application/x-fictionbook+xml", "application/fb2+zip", "text/plain", "application/octet-stream"})
+                if (context.getPackageManager().resolveActivity(new Intent(view).setDataAndType(uri, mime), android.content.pm.PackageManager.MATCH_DEFAULT_ONLY) == null)
+                    throw new AssertionError("Open with handler missing: " + mime);
+            screen = (MainActivity) startActivitySync(view); MainActivity active = screen;
+            awaitField(screen, "current"); ReaderPages pages = awaitPages(screen);
+            Books.Book book = (Books.Book) field(screen, "current");
+            if (!book.title().equals("Footnotes EPUB") || book.notes().size() != 1) throw new AssertionError("External EPUB import / footnote");
+            if (Math.abs(((android.text.TextPaint) field(pages, "paint")).getTextSize() / context.getResources().getDisplayMetrics().scaledDensity - 10) > .1)
+                throw new AssertionError("10 sp pagination font");
+            Books.Note note = book.notes().get(0);
+            if (!book.text().substring(note.start(), note.end()).equals("[1]")) throw new AssertionError("EPUB footnote offsets");
+            int count = store.list().size();
+            for (int variant = 0; variant < 4; variant++) {
+                boolean paged = variant % 2 == 0; int theme = variant / 2 * 2;
+                runOnMainSync(() -> { ((ReaderOptions) field(active, "options")).put("theme", theme); ((ReaderOptions) field(active, "options")).put("pages", paged); invoke(active, "changedOptions"); });
+                if (paged) awaitPages(screen); else { awaitField(screen, "body"); Thread.sleep(250); waitForIdleSync(); }
+                int anchor = (int) field(screen, "anchor");
+                float[] point = new float[2];
+                runOnMainSync(() -> {
+                    View textView = (View) field(active, paged ? "pageReader" : "body");
+                    android.text.Layout layout; int from, top, margin;
+                    if (paged) {
+                        ReaderPages.Page page = ((ReaderPages) textView).visiblePages().get(0);
+                        layout = page.layout(); from = page.sourceStart(); top = Math.round(12 * context.getResources().getDisplayMetrics().density) - page.top();
+                        margin = Math.round(8 * context.getResources().getDisplayMetrics().density);
+                    } else { layout = ((TextView) textView).getLayout(); from = (int) field(active, "textStart"); top = textView.getPaddingTop(); margin = textView.getPaddingLeft(); }
+                    int at = note.start() - from + 1, line = layout.getLineForOffset(at); int[] location = new int[2]; textView.getLocationOnScreen(location);
+                    point[0] = location[0] + margin + layout.getPrimaryHorizontal(at);
+                    point[1] = location[1] + top + (layout.getLineTop(line) + layout.getLineBottom(line)) / 2f;
+                });
+                long now = android.os.SystemClock.uptimeMillis();
+                sendPointerSync(MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, point[0], point[1], 0));
+                sendPointerSync(MotionEvent.obtain(now, now + 50, MotionEvent.ACTION_UP, point[0], point[1], 0)); waitForIdleSync();
+                boolean shown = false;
+                for (int retry = 0; retry < 40 && !shown; retry++) {
+                    AccessibilityNodeInfo window = getUiAutomation().getRootInActiveWindow();
+                    shown = window != null && !window.findAccessibilityNodeInfosByText("A star helps Mira").isEmpty();
+                    if (!shown) Thread.sleep(50);
+                }
+                if (!shown) throw new AssertionError("Footnote tap did not open text in " + paged);
+                capture((paged ? "note-pages-" : "note-scroll-") + theme); clickSystem("OK");
+                if ((int) field(screen, "anchor") != anchor || (boolean) field(screen, "fullscreen")) throw new AssertionError("Note changed reading position/panels");
+            }
+            runOnMainSync(() -> {
+                ((ReaderOptions) field(active, "options")).put("size", 12); invoke(active, "changedOptions");
+                invoke(active, "quickAppearance");
+            });
+            clickSystem("Decrease Text size"); clickSystem("Decrease Text size"); clickSystem("Decrease Text size");
+            if (((ReaderOptions) field(active, "options")).number("size", 0) != 10) throw new AssertionError("Quick appearance must reach and stop at 10 sp");
+            clickSystem("Done");
+            // Reimport restores links without replacing text or bookmarks.
+            File file = new File(context.getFilesDir(), "books/" + book.id() + ".json");
+            JSONObject legacy = new JSONObject(new String(java.nio.file.Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8)); legacy.remove("notes");
+            java.nio.file.Files.write(file.toPath(), legacy.toString().getBytes(StandardCharsets.UTF_8));
+            Books.Book repaired = store.importBook(uri, book.id());
+            if (!repaired.id().equals(book.id()) || !repaired.text().equals(book.text()) || repaired.notes().size() != 1) throw new AssertionError("Note repair changed original text");
+            runOnMainSync(() -> invoke(active, "jump", new Class[]{int.class}, 400)); Thread.sleep(300); waitForIdleSync();
+            int saved = (int) field(active, "anchor");
+            runOnMainSync(() -> context.startActivity(new Intent(view).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)));
+            Thread.sleep(500); waitForIdleSync(); awaitField(screen, "body");
+            if (!((Books.Book) field(screen, "current")).id().equals(book.id()) || store.list().size() != count) throw new AssertionError("External duplicate created a new book");
+            if ((int) field(screen, "anchor") != saved) throw new AssertionError("External duplicate lost progress");
+            Intent share = new Intent(Intent.ACTION_SEND).setType("application/epub+zip").putExtra(Intent.EXTRA_STREAM, uri).setPackage(context.getPackageName())
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            if (context.getPackageManager().resolveActivity(share, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY) == null) throw new AssertionError("Share handler missing");
+            runOnMainSync(() -> context.startActivity(share)); Thread.sleep(500); waitForIdleSync();
+            if (store.list().size() != count) throw new AssertionError("Share created duplicate");
+        } finally {
+            if (screen != null) { MainActivity closing = screen; runOnMainSync(closing::finish); }
+            context.getContentResolver().delete(uri, null, null); prefs.edit().putString("options", previous).commit();
+        }
     }
     private void fb2Check(Books store, byte[] cover) throws Exception {
         String xml = "<?xml version='1.0' encoding='UTF-8'?><FictionBook xmlns='http://www.gribuser.ru/xml/fictionbook/2.0' xmlns:l='http://www.w3.org/1999/xlink'>"

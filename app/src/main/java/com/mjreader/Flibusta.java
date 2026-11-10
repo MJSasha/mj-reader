@@ -5,12 +5,13 @@ import org.w3c.dom.*;
 import java.io.*;
 import java.net.*;
 import java.util.*;
+import java.util.concurrent.*;
 
 /** OPDS 1.x reader. Only explicit acquisition links become downloadable books. */
 final class Flibusta {
     static final String DEFAULT = "https://flibusta.site/opds";
     static final int BOOK_LIMIT = 32_000_000;
-    static final List<String> MIRRORS = Arrays.asList(DEFAULT, "https://flibusta.is/opds");
+    static final List<String> MIRRORS = Arrays.asList(DEFAULT, "https://www.flibusta.site/opds", "https://flibusta.is/opds");
     record Details(String language, String publisher, String issued, String identifier, List<String> genres, String size, long downloads) {}
     record Entry(String title, String author, String summary, String url, String format, boolean book, Details details) {
         Entry(String title, String author, String summary, String url, String format, boolean book) {
@@ -23,32 +24,80 @@ final class Flibusta {
     record Feed(String title, List<Entry> entries, String next) {}
     record Loaded(Feed feed, String url, String base) {}
     static Loaded loadMirrors(String requested, List<String> bases) throws Exception { return loadMirrors(requested, bases, null); }
+    private record Attempt(Loaded loaded, String base, Exception error) {}
+    private static final Map<String, Cached> cache = new LinkedHashMap<>();
+    private record Cached(Feed feed, long expires) {}
     static Loaded loadMirrors(String requested, List<String> bases, java.util.function.BiConsumer<String, Integer> progress) throws Exception {
         URL request = https(requested); int opds = request.getFile().indexOf("/opds");
         if (opds < 0) throw new IOException("Invalid OPDS path");
         String suffix = request.getFile().substring(opds + 5);
-        Exception failure = null; List<String> remaining = new ArrayList<>(bases); int attempt = 0;
-        long deadline = android.os.SystemClock.elapsedRealtime() + 40000;
-        for (int round = 0; round < 3 && !remaining.isEmpty(); round++) {
-            if (round > 0) Thread.sleep(500L * round);
-            List<String> retry = new ArrayList<>();
-            for (String base : remaining) {
-                if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException();
-                if (attempt > 0 && android.os.SystemClock.elapsedRealtime() >= deadline) break;
-                String url = catalog(base) + suffix;
-                if (progress != null) progress.accept(https(base).getHost(), ++attempt); else attempt++;
-                try { return new Loaded(load(url), url, base); }
-                catch (Exception error) { failure = error; if (retryable(error)) retry.add(base); }
+        List<String> remaining = new ArrayList<>(new LinkedHashSet<>(bases));
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        Set<HttpURLConnection> connections = ConcurrentHashMap.newKeySet();
+        java.util.concurrent.atomic.AtomicBoolean closed = new java.util.concurrent.atomic.AtomicBoolean();
+        ConnectionObserver observer = connection -> {
+            connections.add(connection);
+            if (closed.get()) { connection.disconnect(); throw new InterruptedIOException(); }
+        };
+        Exception failure = null; int attempts = 0;
+        long deadline = android.os.SystemClock.elapsedRealtime() + 20000;
+        try {
+            for (int round = 0; round < 3 && !remaining.isEmpty(); round++) {
+                if (round > 0) Thread.sleep(250L * round);
+                CompletionService<Attempt> results = new ExecutorCompletionService<>(pool);
+                List<String> retry = new ArrayList<>();
+                int next = 0, running = 0;
+                long hedge = 0;
+                while (next < remaining.size() || running > 0) {
+                    if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
+                    long now = android.os.SystemClock.elapsedRealtime();
+                    if (now >= deadline) throw new SocketTimeoutException("Catalog time limit");
+                    if (next < remaining.size() && running < 2 && (running == 0 || now >= hedge)) {
+                        String base = catalog(remaining.get(next++)), url = base + suffix;
+                        if (progress != null) progress.accept(https(base).getHost(), ++attempts);
+                        results.submit(() -> {
+                            try { return new Attempt(new Loaded(loadCached(url, observer), url, base), base, null); }
+                            catch (Exception error) { return new Attempt(null, base, error); }
+                        });
+                        running++; hedge = now + 600;
+                    }
+                    Future<Attempt> done = results.poll(100, TimeUnit.MILLISECONDS);
+                    if (done == null) continue;
+                    running--; Attempt result = done.get();
+                    if (result.loaded() != null) return result.loaded();
+                    failure = result.error(); if (retryable(failure)) retry.add(result.base());
+                    hedge = 0; // A definite failure needs no head start for the next mirror.
+                }
+                remaining = retry;
             }
-            remaining = retry;
+        } finally {
+            closed.set(true); pool.shutdownNow();
+            for (HttpURLConnection connection : connections) connection.disconnect();
         }
-        throw new IOException("Каталог недоступен после повторных попыток / Catalog unavailable after retries: " + (failure == null ? "" : failure.getMessage()), failure);
+        throw new IOException("Каталог недоступен / Catalog unavailable: " + (failure == null ? "" : failure.getMessage()), failure);
     }
-    private static boolean retryable(Exception error) {
-        return error instanceof SocketTimeoutException || error instanceof SocketException || error instanceof UnknownHostException || error instanceof EOFException
+    private static Feed loadCached(String url, ConnectionObserver observer) throws Exception {
+        synchronized (cache) {
+            Cached found = cache.get(url);
+            if (found != null && found.expires() > android.os.SystemClock.elapsedRealtime()) return found.feed();
+        }
+        HttpURLConnection connection = open(url, observer, 8000);
+        Feed feed;
+        try (InputStream input = connection.getInputStream()) {
+            if (connection.getContentLengthLong() > 4_000_000) throw new IOException("Response too large");
+            feed = parse(read(input, 4_000_000), url);
+        } finally { connection.disconnect(); }
+        synchronized (cache) {
+            cache.put(url, new Cached(feed, android.os.SystemClock.elapsedRealtime() + 20000));
+            while (cache.size() > 8) cache.remove(cache.keySet().iterator().next());
+        }
+        return feed;
+    }
+    static boolean retryable(Exception error) {
+        return error instanceof SocketTimeoutException || error instanceof SocketException || error instanceof UnknownHostException || error instanceof EOFException || error instanceof java.net.ProtocolException
                 || error instanceof HttpError http && (http.code == 408 || http.code == 429 || http.code >= 500);
     }
-    private static final class HttpError extends IOException {
+    static final class HttpError extends IOException {
         final int code;
         HttpError(int code, String host) { super("HTTP " + code + " · " + host); this.code = code; }
     }
@@ -68,25 +117,16 @@ final class Flibusta {
         if (configured.contains(last)) bases.add(last);
         bases.addAll(configured); return new ArrayList<>(bases);
     }
-    static HttpURLConnection openBook(String address, List<String> mirrors, ConnectionObserver observer) throws IOException {
+    static List<String> bookUrls(String address, List<String> mirrors) throws IOException {
         URL original = https(address);
         List<String> urls = new ArrayList<>(); urls.add(address);
-        if (mirrors.stream().anyMatch(b -> b.startsWith("https://" + original.getHost() + "/"))) {
-            for (String base : mirrors) {
-                String alternative = new URL(new URL(base), original.getFile()).toString();
-                if (!urls.contains(alternative)) urls.add(alternative);
-            }
+        boolean known = false;
+        for (String base : mirrors) if (https(base).getAuthority().equalsIgnoreCase(original.getAuthority())) known = true;
+        if (known) for (String base : mirrors) {
+            String alternative = new URL(https(base), original.getFile()).toString();
+            if (!urls.contains(alternative)) urls.add(alternative);
         }
-        IOException failure = null;
-        for (String url : urls) {
-            if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException();
-            try { return open(url, observer); }
-            catch (IOException error) {
-                if (error instanceof InterruptedIOException && !(error instanceof SocketTimeoutException)) throw error;
-                failure = error;
-            }
-        }
-        throw failure == null ? new IOException("Download unavailable") : failure;
+        return urls;
     }
     static String catalog(String value) throws IOException {
         URL url = https(value.trim());
@@ -204,12 +244,14 @@ final class Flibusta {
     interface ConnectionObserver { void opened(HttpURLConnection connection) throws IOException; }
     static HttpURLConnection open(String address) throws IOException { return open(address, null); }
     static HttpURLConnection open(String address, ConnectionObserver observer) throws IOException {
+        return open(address, observer, observer == null ? 8000 : 15000);
+    }
+    private static HttpURLConnection open(String address, ConnectionObserver observer, int readTimeout) throws IOException {
         for (int redirects = 0; redirects < 6; redirects++) {
             HttpURLConnection connection = (HttpURLConnection) https(address).openConnection();
-            connection.setConnectTimeout(6000); connection.setReadTimeout(observer == null ? 12000 : 35000); connection.setInstanceFollowRedirects(false);
+            connection.setConnectTimeout(4000); connection.setReadTimeout(readTimeout); connection.setInstanceFollowRedirects(false);
             connection.setRequestProperty("User-Agent", "MJReader/0.8 (Android; OPDS)");
             connection.setRequestProperty("Accept-Encoding", "identity");
-            connection.setRequestProperty("Connection", "close");
             try {
                 if (observer != null) observer.opened(connection);
                 if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException();

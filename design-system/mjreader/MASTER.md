@@ -16,6 +16,7 @@ Use Android Views with branded control drawing and dialogs, preserving native ac
 - Dialog content and actions scroll together on short screens and with large system fonts. Colors come from the active reader theme.
 - Library cards open on tap, and long press opens book actions, with no duplicate Read action. Use an adaptive grid: normally two columns on phones, four at an 800 dp window, up to six on tablets. Cover ratio is 2:3, FIT_CENTER preserves the entire image. Keep a 48 dp book menu separate from the main card action. Large system fonts use fewer, wider columns, falling back to list layout on narrow windows.
 - Press feedback uses immediate tonal states with a visible focus outline. Do not fade entire screens. Loading uses a lightweight animated ring, static when system animations are disabled.
+- Reading text supports 10–36 sp; controls retain their 48 dp targets. Local footnote links use accent color and underline, open a themed dialog, and take precedence over page-edge taps. Center and edge navigation do not fire when a footnote is opened.
 - Native file selection supports multiple files, visible import feedback and per-file results.
 - Deletion is reversible through Deleted. Invalid form fields retain input and show an inline error.
 - Verify light and dark independently, portrait and landscape, large font scale, reduced motion, book position preservation, and live Android behavior before delivery.

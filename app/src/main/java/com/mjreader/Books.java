@@ -19,8 +19,12 @@ import java.util.zip.*;
 final class Books {
     private static final Object IMPORT_LOCK = new Object();
     record Chapter(String title, int offset) {}
+    record Note(int start, int end, String text) {}
     record Illustration(int offset, String source, String alt, byte[] bytes) {}
-    record Book(String id, String title, String author, String text, List<Chapter> chapters, byte[] cover, List<Illustration> illustrations) {
+    record Book(String id, String title, String author, String text, List<Chapter> chapters, byte[] cover, List<Illustration> illustrations, List<Note> notes) {
+        Book(String id, String title, String author, String text, List<Chapter> chapters, byte[] cover, List<Illustration> illustrations) {
+            this(id, title, author, text, chapters, cover, illustrations, List.of());
+        }
         Book(String id, String title, String author, String text, List<Chapter> chapters, byte[] cover) {
             this(id, title, author, text, chapters, cover, List.of());
         }
@@ -29,7 +33,8 @@ final class Books {
         }
     }
     static final class DuplicateBook extends IOException {
-        DuplicateBook() { super("Already in library"); }
+        final String id;
+        DuplicateBook(String id) { super("Already in library"); this.id = id; }
     }
     static final class DifferentBook extends IOException {
         DifferentBook() { super("Choose the original file for this book"); }
@@ -54,7 +59,7 @@ final class Books {
                     JSONObject json = new JSONObject(readBookFile(file));
                     books.add(new Book(file.getName().replace(".json", ""), json.getString("title"),
                             json.getString("author"), json.getString("text"), chapters(json),
-                            json.has("cover") ? android.util.Base64.decode(json.getString("cover"), 0) : null, illustrations(json)));
+                            json.has("cover") ? android.util.Base64.decode(json.getString("cover"), 0) : null, illustrations(json), notes(json)));
                 } catch (Exception ignored) { /* A damaged book must not hide the rest of the library. */ }
             }
         }
@@ -97,6 +102,7 @@ final class Books {
         List<Chapter> chapters = new ArrayList<>();
         byte[] cover = null;
         List<Illustration> illustrations = new ArrayList<>();
+        List<Note> notes = new ArrayList<>();
         String fingerprint = fingerprint(bytes);
         Map<String, byte[]> entries = new HashMap<>();
         boolean fb2 = name.toLowerCase(Locale.ROOT).endsWith(".fb2");
@@ -123,7 +129,7 @@ final class Books {
         if (fb2) {
             Book parsed = Fb2.read(bytes, title);
             title = parsed.title(); author = parsed.author(); text = parsed.text();
-            chapters = parsed.chapters(); cover = parsed.cover(); illustrations = parsed.illustrations();
+            chapters = parsed.chapters(); cover = parsed.cover(); illustrations = parsed.illustrations(); notes = parsed.notes();
         } else if (!entries.isEmpty()) {
             Document container = xml(entries.get("META-INF/container.xml"));
             String packagePath = ((Element) container.getElementsByTagNameNS("*", "rootfile").item(0))
@@ -141,6 +147,7 @@ final class Books {
             StringBuilder result = new StringBuilder();
             Map<String, Integer> chapterOffsets = new HashMap<>();
             Map<String, String> chapterHtml = new HashMap<>();
+            BookNotes epubNotes = new BookNotes(entries);
             NodeList spine = pack.getElementsByTagNameNS("*", "itemref");
             for (int i = 0; i < spine.getLength(); i++) {
                 Element item = (Element) spine.item(i);
@@ -153,6 +160,7 @@ final class Books {
                 String html = decode(chapter).replaceAll("(?is)<(script|style|head)\\b[^>]*>.*?</\\1>", "");
                 android.text.Spanned parsed = Html.fromHtml(html, Html.FROM_HTML_MODE_LEGACY);
                 String chapterText = normalize(parsed.toString());
+                notes.addAll(epubNotes.read(parsed, path, result.length()));
                 // Keep the original replacement character: every stored offset remains stable.
                 android.text.style.ImageSpan[] images = parsed.getSpans(0, parsed.length(), android.text.style.ImageSpan.class);
                 Arrays.sort(images, Comparator.comparingInt(parsed::getSpanStart));
@@ -198,7 +206,7 @@ final class Books {
         for (Book existing : list()) {
             if (expectedId != null && !expectedId.equals(existing.id())) continue;
             if (!existing.text().replaceAll("\\s+", " ").trim().equals(text.replaceAll("\\s+", " ").trim())) continue;
-            if (existing.id().startsWith("demo-")) throw new DuplicateBook();
+            if (existing.id().startsWith("demo-")) throw new DuplicateBook(existing.id());
             matched = true;
             // Parse metadata before deciding this is a duplicate: earlier imports may be incomplete.
             // Preserve the exact stored text so bookmarks and reading positions remain valid.
@@ -225,16 +233,25 @@ final class Books {
                     mapped.add(new Chapter(chapter.title(), oldText.offsets.get(Math.max(0, word))));
                 }
                 chapters = mapped;
+                List<Note> mappedNotes = new ArrayList<>();
+                for (Note note : notes) {
+                    int first = newText.wordAt(note.start()), last = newText.wordAt(Math.max(note.start(), note.end() - 1));
+                    int start = oldText.offsets.get(first) + note.start() - newText.offsets.get(first);
+                    int end = oldText.offsets.get(last) + note.end() - newText.offsets.get(last);
+                    if (start >= 0 && end > start && end <= existing.text().length()) mappedNotes.add(new Note(start, end, note.text()));
+                }
+                notes = mappedNotes;
             }
             if (chapters.size() < existing.chapters().size()) chapters = existing.chapters();
             if (!EpubCover.isImage(cover)) cover = existing.cover();
             if (illustrations.isEmpty()) illustrations = existing.illustrations();
+            if (notes.isEmpty()) notes = existing.notes();
             boolean sameImages = illustrations.size() == existing.illustrations().size();
             for (int i = 0; sameImages && i < illustrations.size(); i++) {
                 Illustration a = illustrations.get(i), b = existing.illustrations().get(i);
                 sameImages = a.offset() == b.offset() && a.alt().equals(b.alt()) && Arrays.equals(a.bytes(), b.bytes());
             }
-            if (chapters.equals(existing.chapters()) && Arrays.equals(cover, existing.cover()) && sameImages) throw new DuplicateBook();
+            if (chapters.equals(existing.chapters()) && Arrays.equals(cover, existing.cover()) && sameImages && notes.equals(existing.notes())) throw new DuplicateBook(existing.id());
             id = existing.id();
             text = existing.text();
             break;
@@ -244,6 +261,9 @@ final class Books {
         JSONArray chapterArray = new JSONArray();
         for (Chapter chapter : chapters) chapterArray.put(new JSONObject().put("title", chapter.title()).put("offset", chapter.offset()));
         json.put("chapters", chapterArray);
+        JSONArray noteArray = new JSONArray();
+        for (Note note : notes) noteArray.put(new JSONObject().put("start", note.start()).put("end", note.end()).put("text", note.text()));
+        json.put("notes", noteArray);
         JSONObject images = new JSONObject();
         JSONArray placements = new JSONArray();
         for (Illustration image : illustrations) {
@@ -261,7 +281,7 @@ final class Books {
             file.failWrite(output);
             throw e;
         }
-        return new Book(id, title, author, text, chapters, cover, illustrations);
+        return new Book(id, title, author, text, chapters, cover, illustrations, notes);
         }
     }
     private static List<Chapter> navigation(Map<String, byte[]> entries, NodeList items, String packagePath,
@@ -330,6 +350,17 @@ final class Books {
     }
     private static String normalize(String text) {
         return text.replace("\uFEFF", "").replace("\u00A0", " ").replace("\r\n", "\n").trim();
+    }
+    private static List<Note> notes(JSONObject json) {
+        List<Note> result = new ArrayList<>();
+        JSONArray array = json.optJSONArray("notes");
+        if (array != null) for (int i = 0; i < array.length(); i++) {
+            JSONObject note = array.optJSONObject(i);
+            if (note != null && note.optInt("start", -1) >= 0 && note.optInt("end") > note.optInt("start")
+                    && note.optInt("end") <= json.optString("text").length() && !note.optString("text").trim().isEmpty())
+                result.add(new Note(note.optInt("start"), note.optInt("end"), note.optString("text")));
+        }
+        return result;
     }
     private static List<Chapter> chapters(JSONObject json) {
         List<Chapter> result = new ArrayList<>();

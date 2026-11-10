@@ -16,6 +16,8 @@ import java.util.concurrent.*;
 import java.util.function.IntConsumer;
 
 public class MainActivity extends Activity {
+    private final ArrayList<Uri> pendingFiles = new ArrayList<>();
+    private boolean libraryLoaded;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final BroadcastReceiver downloadedBooks = new BroadcastReceiver() {
@@ -92,6 +94,8 @@ public class MainActivity extends Activity {
         grid = prefs.getBoolean("grid", true);
         sort = prefs.getInt("sort", 0);
         if (state != null) {
+            ArrayList<Uri> pending = state.getParcelableArrayList("pendingFiles");
+            if (pending != null) pendingFiles.addAll(pending);
             reimportId = state.getString("reimportId");
             query = state.getString("query", "");
             filter = state.getString("filter", "all");
@@ -106,6 +110,7 @@ public class MainActivity extends Activity {
             settingsY = state.getInt("settingsY");
         }
         if (Build.VERSION.SDK_INT >= 33) getOnBackInvokedDispatcher().registerOnBackInvokedCallback(0, this::back);
+        if (state == null) receiveFile(getIntent());
         shell();
         loadingScreen(tr("Ваша библиотека", "Your library"), tr("Загружаем книги…", "Loading books…"));
         worker.execute(() -> {
@@ -113,7 +118,8 @@ public class MainActivity extends Activity {
                 List<Books.Book> loaded = store.list();
                 runOnUiThread(() -> {
                     if (isDestroyed()) return;
-                    books = loaded;
+                    books = loaded; libraryLoaded = true;
+                    if (!pendingFiles.isEmpty() && !importing) { openPendingFile(); return; }
                     String id = state == null ? null : state.getString("book");
                     for (Books.Book book : books) if (book.id().equals(id)) {
                         open(book, state.getBoolean("focus"));
@@ -125,12 +131,33 @@ public class MainActivity extends Activity {
             } catch (Exception e) { runOnUiThread(() -> message(tr("Ошибка загрузки", "Loading failed"), e.toString())); }
         });
     }
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        receiveFile(intent);
+    }
+    private void receiveFile(Intent intent) {
+        if (intent == null) return;
+        Uri uri = Intent.ACTION_VIEW.equals(intent.getAction()) ? intent.getData()
+                : Intent.ACTION_SEND.equals(intent.getAction()) ? intent.getParcelableExtra(Intent.EXTRA_STREAM) : null;
+        if (uri == null || !"content".equals(uri.getScheme())) return;
+        if (!pendingFiles.contains(uri)) pendingFiles.add(uri);
+        // Consume the launch action; recreation restores the pending queue instead.
+        setIntent(new Intent(this, MainActivity.class).setAction(Intent.ACTION_MAIN));
+        openPendingFile();
+    }
+    private void openPendingFile() {
+        if (!libraryLoaded || importing || pendingFiles.isEmpty()) return;
+        pause(); save();
+        importUris(Collections.singletonList(pendingFiles.remove(0)), null, true);
+    }
     @Override protected void onSaveInstanceState(Bundle state) {
         save();
         if (current != null) {
             state.putString("book", current.id());
             state.putBoolean("focus", focus);
         }
+        state.putParcelableArrayList("pendingFiles", pendingFiles);
         state.putString("reimportId", reimportId);
         state.putString("query", query);
         state.putString("filter", filter);
@@ -651,6 +678,9 @@ public class MainActivity extends Activity {
             message(tr("Повторный импорт", "Reimport"), tr("Выберите один исходный файл этой книги.", "Choose one original file for this book."));
             return;
         }
+        importUris(uris, repairId, false);
+    }
+    private void importUris(List<Uri> uris, String repairId, boolean openExisting) {
         importing = true;
         batchRunning = true;
         library();
@@ -674,6 +704,12 @@ public class MainActivity extends Activity {
                     report.append(title(book)).append(" — ").append(added ? tr("добавлена", "added")
                             : tr("обложка, оглавление и иллюстрации обновлены", "cover, contents and illustrations updated")).append("\n");
                 } catch (Exception e) {
+                    if (openExisting && e instanceof Books.DuplicateBook duplicate) {
+                        try {
+                            Books.Book existing = store.list().stream().filter(book -> book.id().equals(duplicate.id)).findFirst().orElse(null);
+                            if (existing != null) { imported.add(existing); continue; }
+                        } catch (Exception ignored) { }
+                    }
                     String name = uri.getLastPathSegment();
                     try (android.database.Cursor cursor = getContentResolver().query(uri, new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null)) {
                         if (cursor != null && cursor.moveToFirst()) name = cursor.getString(0);
@@ -701,6 +737,7 @@ public class MainActivity extends Activity {
                 target.library();
                 if (uris.size() == 1 && imported.size() == 1) target.open(imported.get(0), false);
                 else target.message(target.tr("Результат импорта", "Import results"), report.toString());
+                target.openPendingFile();
             });
         });
     }
@@ -789,7 +826,7 @@ public class MainActivity extends Activity {
                     (from, to) -> styledText(book, appearance, from, to, notes), offset -> {
                         if (version != renderVersion) return;
                         anchor = offset; position = reading.wordAt(anchor); updateTextProgress(); save();
-                    }, this::paragraphActions, () -> setFullscreen(!fullscreen));
+                    }, this::paragraphActions, this::showNote, () -> setFullscreen(!fullscreen));
             root.addView(pageReader, new LinearLayout.LayoutParams(-1, 0, 1));
         } else scrollScreen();
         readingFooter();
@@ -815,9 +852,22 @@ public class MainActivity extends Activity {
         textScroll.addView(body);
         root.addView(textScroll, new LinearLayout.LayoutParams(-1, 0, 1));
         body.setOnClickListener(v -> setFullscreen(!fullscreen));
+        body.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+            @Override public void onInitializeAccessibilityNodeInfo(View host, android.view.accessibility.AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(host, info);
+                ReaderText.noteActions(current, info, textStart, textEnd);
+            }
+            @Override public boolean performAccessibilityAction(View host, int action, Bundle args) {
+                int index = action - ReaderText.NOTE_ACTION;
+                if (index >= 0 && index < current.notes().size()) return showNote(current.notes().get(index).start());
+                return super.performAccessibilityAction(host, action, args);
+            }
+        });
         GestureDetector gestures = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onDown(android.view.MotionEvent event) { return true; }
             @Override public boolean onSingleTapUp(android.view.MotionEvent event) {
+                int offset = ReaderText.hit(body.getLayout(), event.getX() - body.getPaddingLeft(), event.getY() - body.getPaddingTop());
+                if (offset >= 0 && showNote(textStart + offset)) return true;
                 body.performClick();
                 return true;
             }
@@ -956,6 +1006,15 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> { if (version == renderVersion && request == pictureRequest) body.invalidate(); });
         });
     }
+    private boolean showNote(int offset) {
+        if (current == null || offset < 0) return false;
+        for (Books.Note note : current.notes()) if (offset >= note.start() && offset < note.end()) {
+            dialogs().setTitle(tr("Сноска ", "Note ") + current.text().substring(note.start(), note.end()))
+                    .setMessage(note.text()).setPositiveButton(android.R.string.ok, null).show();
+            return true;
+        }
+        return false;
+    }
     private void paragraphActions(int offset) {
         String text = current.text();
         offset = Math.max(0, Math.min(text.length() - 1, offset));
@@ -976,7 +1035,7 @@ public class MainActivity extends Activity {
     private void quickAppearance() {
         LinearLayout content = column();
         AlertDialog[] panel = {null};
-        range(content, tr("Размер текста", "Text size"), 16, 36, options.number("size", 21), value -> {
+        range(content, tr("Размер текста", "Text size"), 10, 36, options.number("size", 21), value -> {
             options.put("size", value); changedOptions();
         });
         range(content, tr("Яркость, 0 = системная", "Brightness, 0 = system"), 0, 100, options.number("brightness", 0), value -> {
@@ -1461,7 +1520,7 @@ public class MainActivity extends Activity {
             content = settingsGroup(page, tr("Типографика", "Typography"));
             choose(content, tr("Шрифт", "Typeface"), new String[]{tr("С засечками", "Serif"), tr("Без засечек", "Sans serif"), tr("Моноширинный", "Monospace")},
                     options.number("font", 0), value -> { options.put("font", value); changedOptions(); });
-            range(content, tr("Размер текста", "Text size"), 16, 36, options.number("size", prefs.getInt("typeSize", 21)),
+            range(content, tr("Размер текста", "Text size"), 10, 36, options.number("size", prefs.getInt("typeSize", 21)),
                     value -> { options.put("size", value); changedOptions(); });
             range(content, tr("Межстрочный интервал, %", "Line height, %"), 110, 200, options.number("line", 150),
                     value -> { options.put("line", value); changedOptions(); });

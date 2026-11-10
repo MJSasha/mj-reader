@@ -9,6 +9,9 @@ final class Fb2 {
     private final StringBuilder text = new StringBuilder();
     private final List<Books.Chapter> chapters = new ArrayList<>();
     private final List<Books.Illustration> illustrations = new ArrayList<>();
+    private int noteCharacters;
+    private final Map<String, String> targets = new HashMap<>();
+    private final List<Books.Note> notes = new ArrayList<>();
     private final Map<String, byte[]> images = new HashMap<>();
 
     static Books.Book read(byte[] bytes, String fallback) throws Exception {
@@ -17,6 +20,20 @@ final class Fb2 {
                 !("http://www.gribuser.ru/xml/fictionbook/2.0".equals(root.getNamespaceURI()) || root.getNamespaceURI() == null))
             throw new IOException("Not a FictionBook document");
         Fb2 book = new Fb2();
+        NodeList elements = root.getElementsByTagName("*");
+        Set<String> references = new HashSet<>();
+        for (int i = 0; i < elements.getLength(); i++) {
+            Element element = (Element) elements.item(i);
+            if ("a".equals(element.getLocalName())) references.add(reference(element));
+        }
+        int characters = 0;
+        for (int i = 0; i < elements.getLength() && characters < 1_000_000; i++) {
+            Element element = (Element) elements.item(i);
+            if (element.hasAttribute("id") && references.contains(element.getAttribute("id")) && !"binary".equals(element.getLocalName())) {
+                String value = BookNotes.text(element); characters += value.length();
+                book.targets.put(element.getAttribute("id"), value);
+            }
+        }
         for (Node node = root.getFirstChild(); node != null; node = node.getNextSibling()) {
             if (!(node instanceof Element binary) || !"binary".equals(binary.getLocalName())) continue;
             if (!binary.getAttribute("content-type").startsWith("image/")) continue;
@@ -41,7 +58,7 @@ final class Fb2 {
         String content = book.text.toString().trim();
         if (content.isEmpty()) throw new IOException("Empty FictionBook body");
         book.chapters.removeIf(chapter -> chapter.offset() >= content.length());
-        return new Books.Book("", title, String.join(", ", authors), content, book.chapters, cover, book.illustrations);
+        return new Books.Book("", title, String.join(", ", authors), content, book.chapters, cover, book.illustrations, book.notes);
     }
     private void append(Node node) {
         if (node.getNodeType() == Node.TEXT_NODE || node.getNodeType() == Node.CDATA_SECTION_NODE) {
@@ -62,6 +79,12 @@ final class Fb2 {
             if (bytes != null) illustrations.add(new Books.Illustration(start, source, clean(element.getAttribute("title")), bytes));
         } else {
             for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling()) append(child);
+        }
+        if ("a".equals(name) && text.length() > start) {
+            String note = targets.get(reference(element));
+            if (note != null && !note.isEmpty() && noteCharacters + note.length() <= 1_000_000) {
+                notes.add(new Books.Note(start, text.length(), note)); noteCharacters += note.length();
+            }
         }
         if ("title".equals(name)) {
             String heading = clean(text.substring(start).replace("\uFFFC", ""));
