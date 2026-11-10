@@ -19,13 +19,20 @@ import java.util.zip.*;
 final class Books {
     private static final Object IMPORT_LOCK = new Object();
     record Chapter(String title, int offset) {}
-    record Book(String id, String title, String author, String text, List<Chapter> chapters, byte[] cover) {
+    record Illustration(int offset, String source, String alt, byte[] bytes) {}
+    record Book(String id, String title, String author, String text, List<Chapter> chapters, byte[] cover, List<Illustration> illustrations) {
+        Book(String id, String title, String author, String text, List<Chapter> chapters, byte[] cover) {
+            this(id, title, author, text, chapters, cover, List.of());
+        }
         Book(String id, String title, String author, String text) {
             this(id, title, author, text, Collections.singletonList(new Chapter(title, 0)), null);
         }
     }
     static final class DuplicateBook extends IOException {
         DuplicateBook() { super("Already in library"); }
+    }
+    static final class DifferentBook extends IOException {
+        DifferentBook() { super("Choose the original file for this book"); }
     }
     private final Context context;
     private final File directory;
@@ -47,7 +54,7 @@ final class Books {
                     JSONObject json = new JSONObject(readBookFile(file));
                     books.add(new Book(file.getName().replace(".json", ""), json.getString("title"),
                             json.getString("author"), json.getString("text"), chapters(json),
-                            json.has("cover") ? android.util.Base64.decode(json.getString("cover"), 0) : null));
+                            json.has("cover") ? android.util.Base64.decode(json.getString("cover"), 0) : null, illustrations(json)));
                 } catch (Exception ignored) { /* A damaged book must not hide the rest of the library. */ }
             }
         }
@@ -60,7 +67,8 @@ final class Books {
         }
         return books;
     }
-    Book importBook(Uri uri) throws Exception {
+    Book importBook(Uri uri) throws Exception { return importBook(uri, null); }
+    Book importBook(Uri uri, String expectedId) throws Exception {
         String name = "Book";
         try (Cursor cursor = context.getContentResolver().query(uri, null, null, null, null)) {
             if (cursor != null && cursor.moveToFirst()) {
@@ -73,20 +81,22 @@ final class Books {
             if (input == null) throw new IOException("No stream");
             bytes = read(input, 32_000_000);
         }
-        return importBook(name, bytes);
+        return importBook(name, bytes, expectedId);
     }
     Book importBook(File file) throws Exception {
         try (InputStream input = new FileInputStream(file)) {
             return importBook(file.getName(), read(input, 32_000_000));
         }
     }
-    private Book importBook(String name, byte[] bytes) throws Exception {
+    private Book importBook(String name, byte[] bytes) throws Exception { return importBook(name, bytes, null); }
+    private Book importBook(String name, byte[] bytes, String expectedId) throws Exception {
         synchronized (IMPORT_LOCK) {
         String title = name.replaceFirst("(?i)\\.(epub|txt)$", "");
         String author = "";
         String text;
         List<Chapter> chapters = new ArrayList<>();
         byte[] cover = null;
+        List<Illustration> illustrations = new ArrayList<>();
         String fingerprint = fingerprint(bytes);
         if (bytes.length >= 2 && bytes[0] == 'P' && bytes[1] == 'K') {
             Map<String, byte[]> entries = new HashMap<>();
@@ -127,11 +137,31 @@ final class Books {
                 byte[] chapter = entries.get(path);
                 if (chapter == null) throw new IOException("Missing chapter");
                 String html = decode(chapter).replaceAll("(?is)<(script|style|head)\\b[^>]*>.*?</\\1>", "");
-                String chapterText = normalize(Html.fromHtml(html, Html.FROM_HTML_MODE_LEGACY).toString());
+                android.text.Spanned parsed = Html.fromHtml(html, Html.FROM_HTML_MODE_LEGACY);
+                String chapterText = normalize(parsed.toString());
+                // Keep the original replacement character: every stored offset remains stable.
+                android.text.style.ImageSpan[] images = parsed.getSpans(0, parsed.length(), android.text.style.ImageSpan.class);
+                Arrays.sort(images, Comparator.comparingInt(parsed::getSpanStart));
+                int imageOffset = 0;
+                for (android.text.style.ImageSpan image : images) {
+                    imageOffset = chapterText.indexOf('\uFFFC', imageOffset);
+                    if (imageOffset < 0) break;
+                    String source = EpubCover.resolve(path, image.getSource());
+                    byte[] imageBytes = entries.get(source);
+                    if (EpubCover.isImage(imageBytes))
+                        illustrations.add(new Illustration(result.length() + imageOffset, source, imageAlt(html, image.getSource()), imageBytes));
+                    imageOffset++;
+                }
                 if (!chapterText.isEmpty()) {
                     String heading = chapterText.split("\n", 2)[0];
                     java.util.regex.Matcher headingMatch = java.util.regex.Pattern.compile("(?is)<h[1-6]\\b[^>]*>(.*?)</h[1-6]>").matcher(html);
-                    if (headingMatch.find()) heading = Html.fromHtml(headingMatch.group(1), 0).toString().trim();
+                    if (headingMatch.find()) {
+                        String markup = headingMatch.group(1);
+                        heading = Html.fromHtml(markup, 0).toString().trim();
+                        if (cleanTitle(heading).isEmpty()) heading = imageAlt(markup, null);
+                    }
+                    heading = cleanTitle(heading);
+                    if (heading.isEmpty()) heading = title + " · " + (chapters.size() + 1);
                     if (heading.length() > 100) heading = heading.substring(0, 100) + "…";
                     chapterOffsets.put(path, result.length());
                     chapterHtml.put(path, html);
@@ -150,12 +180,29 @@ final class Books {
         if (text.isEmpty() || text.indexOf('\0') >= 0) throw new IOException("Empty or binary book");
         if (chapters.isEmpty()) chapters.add(new Chapter(title, 0));
         String id = UUID.randomUUID().toString();
+        boolean matched = false;
         for (Book existing : list()) {
+            if (expectedId != null && !expectedId.equals(existing.id())) continue;
             if (!existing.text().replaceAll("\\s+", " ").trim().equals(text.replaceAll("\\s+", " ").trim())) continue;
             if (existing.id().startsWith("demo-")) throw new DuplicateBook();
+            matched = true;
             // Parse metadata before deciding this is a duplicate: earlier imports may be incomplete.
             // Preserve the exact stored text so bookmarks and reading positions remain valid.
             if (!existing.text().equals(text)) {
+                // Whitespace-only legacy repairs map image markers by order, without rewriting text.
+                List<Illustration> mappedImages = new ArrayList<>();
+                int oldImage = 0, newImage = 0;
+                for (int offset = text.indexOf('\uFFFC'); offset >= 0; offset = text.indexOf('\uFFFC', offset + 1)) {
+                    oldImage = existing.text().indexOf('\uFFFC', oldImage);
+                    if (oldImage < 0) break;
+                    while (newImage < illustrations.size() && illustrations.get(newImage).offset() < offset) newImage++;
+                    if (newImage < illustrations.size() && illustrations.get(newImage).offset() == offset) {
+                        Illustration image = illustrations.get(newImage);
+                        mappedImages.add(new Illustration(oldImage, image.source(), image.alt(), image.bytes()));
+                    }
+                    oldImage++;
+                }
+                illustrations = mappedImages;
                 ReadingText oldText = new ReadingText(existing.text());
                 ReadingText newText = new ReadingText(text);
                 List<Chapter> mapped = new ArrayList<>();
@@ -167,15 +214,29 @@ final class Books {
             }
             if (chapters.size() < existing.chapters().size()) chapters = existing.chapters();
             if (!EpubCover.isImage(cover)) cover = existing.cover();
-            if (chapters.equals(existing.chapters()) && Arrays.equals(cover, existing.cover())) throw new DuplicateBook();
+            if (illustrations.isEmpty()) illustrations = existing.illustrations();
+            boolean sameImages = illustrations.size() == existing.illustrations().size();
+            for (int i = 0; sameImages && i < illustrations.size(); i++) {
+                Illustration a = illustrations.get(i), b = existing.illustrations().get(i);
+                sameImages = a.offset() == b.offset() && a.alt().equals(b.alt()) && Arrays.equals(a.bytes(), b.bytes());
+            }
+            if (chapters.equals(existing.chapters()) && Arrays.equals(cover, existing.cover()) && sameImages) throw new DuplicateBook();
             id = existing.id();
             text = existing.text();
             break;
         }
+        if (expectedId != null && !matched) throw new DifferentBook();
         JSONObject json = new JSONObject().put("title", title).put("author", author).put("text", text).put("fingerprint", fingerprint);
         JSONArray chapterArray = new JSONArray();
         for (Chapter chapter : chapters) chapterArray.put(new JSONObject().put("title", chapter.title()).put("offset", chapter.offset()));
         json.put("chapters", chapterArray);
+        JSONObject images = new JSONObject();
+        JSONArray placements = new JSONArray();
+        for (Illustration image : illustrations) {
+            if (!images.has(image.source())) images.put(image.source(), android.util.Base64.encodeToString(image.bytes(), android.util.Base64.NO_WRAP));
+            placements.put(new JSONObject().put("offset", image.offset()).put("source", image.source()).put("alt", image.alt()));
+        }
+        json.put("images", images).put("illustrations", placements);
         if (cover != null) json.put("cover", android.util.Base64.encodeToString(cover, android.util.Base64.NO_WRAP));
         AtomicFile file = new AtomicFile(new File(directory, id + ".json"));
         FileOutputStream output = file.startWrite();
@@ -186,7 +247,7 @@ final class Books {
             file.failWrite(output);
             throw e;
         }
-        return new Book(id, title, author, text, chapters, cover);
+        return new Book(id, title, author, text, chapters, cover, illustrations);
         }
     }
     private static List<Chapter> navigation(Map<String, byte[]> entries, NodeList items, String packagePath,
@@ -223,6 +284,11 @@ final class Books {
                     }
                     java.net.URI target = new java.net.URI(path).resolve(href);
                     Integer base = offsets.get(target.getPath());
+                    title = cleanTitle(title);
+                    if (title.isEmpty() && nav) {
+                        NodeList images = link.getElementsByTagNameNS("*", "img");
+                        if (images.getLength() > 0) title = cleanTitle(((Element) images.item(0)).getAttribute("alt"));
+                    }
                     if (base == null || title.isEmpty()) continue;
                     int offset = base;
                     if (target.getFragment() != null) {
@@ -256,9 +322,43 @@ final class Books {
         JSONArray array = json.optJSONArray("chapters");
         if (array != null) for (int i = 0; i < array.length(); i++) {
             JSONObject item = array.optJSONObject(i);
-            if (item != null) result.add(new Chapter(item.optString("title"), item.optInt("offset")));
+            if (item != null) {
+                String title = cleanTitle(item.optString("title"));
+                result.add(new Chapter(title.isEmpty() ? json.optString("title") + " · " + (i + 1) : title, item.optInt("offset")));
+            }
         }
         if (result.isEmpty()) result.add(new Chapter(json.optString("title"), 0));
+        return result;
+    }
+    private static String cleanTitle(String title) {
+        return title.replace("\uFFFC", "").replaceAll("[\\s\\p{Z}]+", " ").trim();
+    }
+    private static String imageAlt(String html, String source) {
+        java.util.regex.Matcher tags = java.util.regex.Pattern.compile("(?is)<img\\b[^>]*>").matcher(html);
+        while (tags.find()) {
+            String tag = tags.group();
+            if (source != null) {
+                java.util.regex.Matcher src = java.util.regex.Pattern.compile("(?is)\\bsrc\\s*=\\s*([\\x22'])(.*?)\\1").matcher(tag);
+                if (!src.find() || !Html.fromHtml(src.group(2), 0).toString().equals(source)) continue;
+            }
+            java.util.regex.Matcher alt = java.util.regex.Pattern.compile("(?is)\\balt\\s*=\\s*([\\x22'])(.*?)\\1").matcher(tag);
+            if (alt.find()) return cleanTitle(Html.fromHtml(alt.group(2), 0).toString());
+        }
+        return "";
+    }
+    private static List<Illustration> illustrations(JSONObject json) {
+        List<Illustration> result = new ArrayList<>();
+        JSONObject assets = json.optJSONObject("images");
+        JSONArray placements = json.optJSONArray("illustrations");
+        if (assets == null || placements == null) return result;
+        Map<String, byte[]> decoded = new HashMap<>();
+        for (int i = 0; i < placements.length(); i++) {
+            JSONObject item = placements.optJSONObject(i);
+            if (item == null) continue;
+            String source = item.optString("source");
+            if (!decoded.containsKey(source)) decoded.put(source, android.util.Base64.decode(assets.optString(source), 0));
+            result.add(new Illustration(item.optInt("offset"), source, item.optString("alt"), decoded.get(source)));
+        }
         return result;
     }
     private static String fingerprint(byte[] bytes) throws Exception {

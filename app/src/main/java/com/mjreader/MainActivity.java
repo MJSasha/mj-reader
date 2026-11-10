@@ -39,12 +39,15 @@ public class MainActivity extends Activity {
     private BookAdapter adapter;
     private EditText librarySearch;
     private String query = "", filter = "all", collectionFilter = "";
+    private String reimportId;
     private int sort, libraryRow, position, anchor, returnAnchor = -1, speed, countdown;
     private int libraryBookIndex = -1, libraryOffset;
     private boolean grid, focus, playing, restoring, fullscreen, importing;
     private static volatile boolean batchRunning;
     private static java.lang.ref.WeakReference<MainActivity> active = new java.lang.ref.WeakReference<>(null);
     private ScrollView textScroll;
+    private ReaderPages pageReader;
+    private int pictureRequest, restoreRequest;
     private TextView body, counter, contextLabel, chapterLabel, importStatus;
     private FocusView focusView;
     private Button play;
@@ -89,6 +92,7 @@ public class MainActivity extends Activity {
         grid = prefs.getBoolean("grid", true);
         sort = prefs.getInt("sort", 0);
         if (state != null) {
+            reimportId = state.getString("reimportId");
             query = state.getString("query", "");
             filter = state.getString("filter", "all");
             collectionFilter = state.getString("collection", "");
@@ -127,6 +131,7 @@ public class MainActivity extends Activity {
             state.putString("book", current.id());
             state.putBoolean("focus", focus);
         }
+        state.putString("reimportId", reimportId);
         state.putString("query", query);
         state.putString("filter", filter);
         state.putString("collection", collectionFilter);
@@ -204,7 +209,7 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(options.background());
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             int width = getResources().getConfiguration().screenWidthDp;
-            int limit = current != null || settingsOpen ? 700 : 1200;
+            int limit = settingsOpen || (current != null && (focus || !options.flag("pages", false))) ? 700 : 1200;
             int gutter = Math.max(width >= 600 ? 24 : 16, (width - limit) / 2);
             view.setPadding(dp(gutter) + insets.getSystemWindowInsetLeft(), dp(8) + insets.getSystemWindowInsetTop(),
                     dp(gutter) + insets.getSystemWindowInsetRight(), dp(8) + insets.getSystemWindowInsetBottom());
@@ -256,6 +261,8 @@ public class MainActivity extends Activity {
         fullscreen = false;
         options = ReaderOptions.load(prefs, null);
         textScroll = null;
+        pageReader = null;
+        body = null;
         shell();
         LinearLayout mast = row();
         TextView brand = label("MJ / READER", 14, options.accent());
@@ -541,17 +548,19 @@ public class MainActivity extends Activity {
         return result;
     }
     private void bookMenu(Books.Book book) {
-        String[] actions = {tr("Название и автор", "Title & author"), tr("Статус чтения", "Reading status"),
-                tr("Избранное", "Favorite"), tr("Коллекции", "Collections"), tr("Сбросить прогресс", "Reset progress"), tr("Удалить", "Delete")};
-        dialogs().setTitle(title(book)).setItems(actions, (dialog, index) -> {
+        List<String> actions = new ArrayList<>(Arrays.asList(tr("Название и автор", "Title & author"), tr("Статус чтения", "Reading status"),
+                tr("Избранное", "Favorite"), tr("Коллекции", "Collections"), tr("Сбросить прогресс", "Reset progress"), tr("Удалить", "Delete")));
+        if (!book.id().startsWith("demo-")) actions.add(tr("Повторный импорт", "Reimport"));
+        dialogs().setTitle(title(book)).setItems(actions.toArray(new String[0]), (dialog, index) -> {
             switch (index) {
+                case 6 -> pickBooks(book.id());
                 case 0 -> editBook(book);
-                case 1 -> dialogs().setTitle(actions[1]).setItems(
+                case 1 -> dialogs().setTitle(actions.get(1)).setItems(
                         new String[]{tr("Хочу прочитать", "Want to read"), tr("Читаю", "Reading"), tr("Прочитано", "Finished")},
                         (d, value) -> { prefs.edit().putString(key(book, "status"), new String[]{"want", "reading", "done"}[value]).apply(); adapter.refresh(); }).show();
                 case 2 -> { prefs.edit().putBoolean(key(book, "favorite"), !prefs.getBoolean(key(book, "favorite"), false)).apply(); adapter.refresh(); }
                 case 3 -> assignCollections(book);
-                case 4 -> dialogs().setTitle(actions[4]).setMessage(title(book)).setNegativeButton(android.R.string.cancel, null)
+                case 4 -> dialogs().setTitle(actions.get(4)).setMessage(title(book)).setNegativeButton(android.R.string.cancel, null)
                         .setPositiveButton(android.R.string.ok, (d, value) -> {
                             prefs.edit().putInt(book.id(), 0).putInt(key(book, "anchor"), 0).putString(key(book, "status"), "want").apply(); adapter.refresh();
                         }).show();
@@ -604,12 +613,14 @@ public class MainActivity extends Activity {
             prefs.edit().putStringSet(key(book, "collections"), selected).apply(); adapter.refresh();
         }).show();
     }
-    private void pickBooks() {
+    private void pickBooks() { pickBooks(null); }
+    private void pickBooks(String bookId) {
         if (importing) return;
+        reimportId = bookId;
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE);
         intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/epub+zip", "text/plain", "application/octet-stream"});
-        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-        startActivityForResult(intent, 1);
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, bookId == null);
+        startActivityForResult(intent, bookId == null ? 1 : 2);
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
@@ -622,11 +633,22 @@ public class MainActivity extends Activity {
             });
             return;
         }
-        if (request != 1 || result != RESULT_OK || data == null) return;
+        if (request != 1 && request != 2) return;
+        String repairId = request == 2 ? reimportId : null;
+        if (request == 2) reimportId = null;
+        if (result != RESULT_OK || data == null) return;
+        if (request == 2 && repairId == null) {
+            message(tr("Повторный импорт", "Reimport"), tr("Выберите повторный импорт в меню книги ещё раз.", "Choose Reimport from the book menu again."));
+            return;
+        }
         List<Uri> uris = new ArrayList<>();
         if (data.getClipData() != null) for (int i = 0; i < data.getClipData().getItemCount(); i++) uris.add(data.getClipData().getItemAt(i).getUri());
         else if (data.getData() != null) uris.add(data.getData());
         if (uris.isEmpty()) return;
+        if (repairId != null && uris.size() != 1) {
+            message(tr("Повторный импорт", "Reimport"), tr("Выберите один исходный файл этой книги.", "Choose one original file for this book."));
+            return;
+        }
         importing = true;
         batchRunning = true;
         library();
@@ -644,18 +666,21 @@ public class MainActivity extends Activity {
                         target.importStatus.setText(target.tr("Импорт ", "Import ") + number + target.tr(" из ", " of ") + uris.size());
                 });
                 try {
-                    Books.Book book = store.importBook(uri);
+                    Books.Book book = store.importBook(uri, repairId);
                     imported.add(book);
                     boolean added = knownIds.add(book.id());
                     report.append(title(book)).append(" — ").append(added ? tr("добавлена", "added")
-                            : tr("обложка и оглавление обновлены", "cover and contents updated")).append("\n");
+                            : tr("обложка, оглавление и иллюстрации обновлены", "cover, contents and illustrations updated")).append("\n");
                 } catch (Exception e) {
                     String name = uri.getLastPathSegment();
                     try (android.database.Cursor cursor = getContentResolver().query(uri, new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null)) {
                         if (cursor != null && cursor.moveToFirst()) name = cursor.getString(0);
                     } catch (Exception ignored) {}
-                    report.append(name).append(" — ").append(e instanceof Books.DuplicateBook
-                            ? tr("уже в библиотеке (проверьте также «Удалённые»)", "already in library (also check Deleted)")
+                    report.append(name).append(" — ").append(e instanceof Books.DifferentBook
+                            ? tr("это другой файл. Выберите исходный файл этой книги; библиотека не изменена.", "this is a different book. Choose its original file; the library was not changed.")
+                            : e instanceof Books.DuplicateBook
+                            ? (repairId != null ? tr("книга уже обновлена, изменений нет", "book is already up to date")
+                                    : tr("уже в библиотеке (проверьте также «Удалённые»)", "already in library (also check Deleted)"))
                             : tr("не удалось прочитать. Выберите TXT или EPUB без DRM. ", "could not read. Choose TXT or DRM-free EPUB. ") + e.getMessage()).append("\n");
                 }
             }
@@ -709,6 +734,8 @@ public class MainActivity extends Activity {
         focusView = null;
         play = null;
         textScroll = null;
+        pageReader = null;
+        body = null;
         shell();
         header = column();
         LinearLayout top = row();
@@ -750,6 +777,23 @@ public class MainActivity extends Activity {
     // LineBreaker constants are inlined; the TextView setters exist since API 26.
     @android.annotation.SuppressLint({"NewApi", "ClickableViewAccessibility"})
     private void textScreen() {
+        if (options.flag("pages", false)) {
+            int version = renderVersion;
+            // Snapshot notes before the layout worker uses them.
+            JSONArray notes = bookmarkData();
+            Books.Book book = current;
+            ReaderOptions appearance = new ReaderOptions(options.values.toString());
+            pageReader = new ReaderPages(this, book, appearance, anchor, worker,
+                    (from, to) -> styledText(book, appearance, from, to, notes), offset -> {
+                        if (version != renderVersion) return;
+                        anchor = offset; position = reading.wordAt(anchor); updateTextProgress(); save();
+                    }, this::paragraphActions, () -> setFullscreen(!fullscreen));
+            root.addView(pageReader, new LinearLayout.LayoutParams(-1, 0, 1));
+        } else scrollScreen();
+        readingFooter();
+    }
+    @android.annotation.SuppressLint({"NewApi", "ClickableViewAccessibility"})
+    private void scrollScreen() {
         textScroll = new ScrollView(this) {
             @Override public boolean onInterceptTouchEvent(android.view.MotionEvent event) {
                 return !options.flag("pages", false) && super.onInterceptTouchEvent(event);
@@ -795,11 +839,6 @@ public class MainActivity extends Activity {
         body.setOnLongClickListener(view -> { paragraphActions(anchor); return true; });
         int version = renderVersion;
         restoring = true;
-        body.post(() -> {
-            if (version != renderVersion || body.getLayout() == null) return;
-            restoreAnchor();
-            body.post(() -> { if (version == renderVersion) restoring = false; });
-        });
         textScroll.setOnScrollChangeListener((view, x, y, oldX, oldY) -> {
             if (restoring || version != renderVersion || body.getLayout() == null || y == oldY) return;
             int line = body.getLayout().getLineForVertical(Math.max(0, y - body.getPaddingTop()));
@@ -807,6 +846,7 @@ public class MainActivity extends Activity {
             position = reading.wordAt(anchor);
             updateTextProgress();
             save();
+            loadVisiblePictures();
             int edge = Math.max(dp(200), textScroll.getHeight() * 2);
             if ((textStart > 0 && y < edge) || (textEnd < current.text().length() && body.getHeight() - y - textScroll.getHeight() < edge)) {
                 int[] next = ReaderText.window(current.text(), anchor);
@@ -817,16 +857,15 @@ public class MainActivity extends Activity {
                         if (version != renderVersion) return;
                         textStart = next[0]; textEnd = next[1];
                         applyReadingText();
-                        body.post(() -> {
-                            if (version != renderVersion) return;
-                            restoreAnchor();
-                            body.post(() -> { if (version == renderVersion) restoring = false; });
-                        });
                     });
                 }
             }
         });
+    }
+    private void readingFooter() {
         footer = column();
+        footer.setPadding(dp(8), dp(8), dp(8), dp(8));
+        footer.setBackground(shape(options.surface(), 20));
         LinearLayout navigation = row();
         Button previous = button("←", false, () -> turnPage(-1));
         previous.setContentDescription(getString(R.string.previous_page));
@@ -838,7 +877,7 @@ public class MainActivity extends Activity {
         counter.setContentDescription(tr("Прогресс и переход по книге", "Reading progress and navigation"));
         counter.setOnClickListener(v -> readingNavigation());
         counter.setFocusable(true);
-        counter.setBackground(feedback(shape(options.background(), 14)));
+        counter.setBackground(feedback(shape(options.surface(), 14)));
         navigation.addView(counter, new LinearLayout.LayoutParams(0, -2, 1));
         space(navigation);
         Button next = button("→", false, () -> turnPage(1));
@@ -848,44 +887,79 @@ public class MainActivity extends Activity {
         if (getResources().getConfiguration().screenHeightDp >= 400) {
             LinearLayout tools = row();
             tools.addView(readerAction("list", tr("Оглавление", "Contents"), this::contents), weight());
+            space(tools);
             tools.addView(readerAction("bookmark", tr("Добавить закладку", "Add bookmark"), this::addBookmark), weight());
+            space(tools);
             tools.addView(readerAction("sun", tr("День / ночь", "Day / night"), () -> {
                 options.put("theme", options.light() ? 0 : 2); changedOptions();
             }), weight());
             Button rsvp = readerAction("speed", "RSVP", () -> { focus = true; reader(); });
-            if (getResources().getConfiguration().fontScale < 1.6f) rsvp.setText("RSVP");
-            tools.addView(rsvp, new LinearLayout.LayoutParams(0, -2, 1.4f));
+            space(tools);
+            tools.addView(rsvp, weight());
+            gap(footer, 8);
             footer.addView(tools);
         }
-        root.addView(footer);
+        LinearLayout.LayoutParams dock = new LinearLayout.LayoutParams(-1, -2);
+        dock.topMargin = dp(8);
+        root.addView(footer, dock);
         updateTextProgress();
     }
     private Button readerAction(String icon, String description, Runnable action) {
         Button button = button("", false, action);
         button.setContentDescription(description);
         button.setTooltipText(description);
-        button.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, icon, options.ink()), null, null, null);
-        button.setBackground(feedback(shape(options.background(), 14)));
+        LayerDrawable background = new LayerDrawable(new Drawable[]{feedback(shape(options.surface(), 14)), new ReaderIcon(this, icon, options.ink())});
+        background.setLayerSize(1, dp(24), dp(24));
+        background.setLayerGravity(1, Gravity.CENTER);
+        button.setBackground(background);
         return button;
     }
     private void applyReadingText() {
         if (body == null || current == null || focus) return;
-        SpannableString styled = ReaderText.style(this, current, options, textStart, textEnd);
-        JSONArray notes = bookmarkData();
+        int version = renderVersion, from = textStart, to = textEnd;
+        Books.Book book = current;
+        ReaderOptions appearance = options;
+        SpannableString styled = styledText(book, appearance, from, to, bookmarkData());
+        int width = Math.max(dp(48), getResources().getDisplayMetrics().widthPixels - dp(64));
+        int height = Math.max(dp(48), getResources().getDisplayMetrics().heightPixels / 2);
+        worker.execute(() -> {
+            ReaderText.illustrate(book, styled, from, width, height);
+            runOnUiThread(() -> {
+                if (version != renderVersion || from != textStart || to != textEnd || body == null) return;
+                restoring = true;
+                body.setText(styled);
+                restoreAfterLayout();
+            });
+        });
+    }
+    private SpannableString styledText(Books.Book book, ReaderOptions appearance, int from, int to, JSONArray notes) {
+        SpannableString styled = ReaderText.style(this, book, appearance, from, to);
         for (int i = 0; i < notes.length(); i++) {
             JSONObject note = notes.optJSONObject(i);
             if (note == null) continue;
             int originalStart = note.optInt("offset");
             int originalEnd = note.optInt("end", originalStart);
-            int start = Math.max(originalStart, textStart) - textStart;
-            int end = Math.min(originalEnd, textEnd) - textStart;
+            int start = Math.max(originalStart, from) - from;
+            int end = Math.min(originalEnd, to) - from;
             if (start >= 0 && end > start && end <= styled.length()) {
-                int accent = options.accent();
+                int accent = appearance.accent();
                 styled.setSpan(new android.text.style.BackgroundColorSpan(Color.argb(45, Color.red(accent), Color.green(accent), Color.blue(accent))),
                         start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
         }
-        body.setText(styled);
+        return styled;
+    }
+    private void loadVisiblePictures() {
+        if (body == null || textScroll == null || body.getLayout() == null || !(body.getText() instanceof Spanned text)) return;
+        int version = renderVersion, request = ++pictureRequest;
+        android.text.Layout layout = body.getLayout();
+        int y = Math.max(0, textScroll.getScrollY() - body.getPaddingTop());
+        int from = layout.getLineStart(layout.getLineForVertical(y));
+        int to = layout.getLineEnd(layout.getLineForVertical(y + textScroll.getHeight()));
+        worker.execute(() -> {
+            ReaderText.loadPictures(text, from, to);
+            runOnUiThread(() -> { if (version == renderVersion && request == pictureRequest) body.invalidate(); });
+        });
     }
     private void paragraphActions(int offset) {
         String text = current.text();
@@ -965,11 +1039,11 @@ public class MainActivity extends Activity {
                 && event.hasNoModifiers() && (event.getKeyCode() == KeyEvent.KEYCODE_PAGE_DOWN || event.getKeyCode() == KeyEvent.KEYCODE_PAGE_UP)) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 int direction = event.getKeyCode() == KeyEvent.KEYCODE_PAGE_DOWN ? 1 : -1;
-                if (focus) seekSentence(direction); else if (textScroll != null) turnPage(direction);
+                if (focus) seekSentence(direction); else if (textScroll != null || pageReader != null) turnPage(direction);
             }
             return true;
         }
-        if (current != null && !focus && !settingsOpen && textScroll != null && options.flag("volumePages", false)
+        if (current != null && !focus && !settingsOpen && (textScroll != null || pageReader != null) && options.flag("volumePages", false)
                 && (event.getKeyCode() == android.view.KeyEvent.KEYCODE_VOLUME_DOWN || event.getKeyCode() == android.view.KeyEvent.KEYCODE_VOLUME_UP)) {
             if (event.getAction() == android.view.KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0)
                 turnPage(event.getKeyCode() == android.view.KeyEvent.KEYCODE_VOLUME_DOWN ? 1 : -1);
@@ -977,13 +1051,36 @@ public class MainActivity extends Activity {
         }
         return super.dispatchKeyEvent(event);
     }
+    private void restoreAfterLayout() {
+        TextView text = body;
+        int version = renderVersion, request = ++restoreRequest;
+        restoring = true;
+        // Async image sizing must finish layout before ScrollView restores/clamps its position.
+        text.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
+            @Override public boolean onPreDraw() {
+                if (version != renderVersion || request != restoreRequest) {
+                    text.getViewTreeObserver().removeOnPreDrawListener(this); return true;
+                }
+                if (text.getLayout() == null || text.length() == 0) return true;
+                text.getViewTreeObserver().removeOnPreDrawListener(this);
+                restoreAnchor();
+                loadVisiblePictures();
+                text.postOnAnimation(() -> {
+                    if (version == renderVersion && request == restoreRequest) restoring = false;
+                });
+                return true;
+            }
+        });
+        text.requestLayout();
+    }
     private void restoreAnchor() {
         if (body == null || body.getLayout() == null || textScroll == null) return;
         int line = body.getLayout().getLineForOffset(Math.max(0, Math.min(anchor - textStart, body.length())));
         textScroll.scrollTo(0, body.getLayout().getLineTop(line) + body.getPaddingTop());
     }
     private void turnPage(int direction) {
-        if (body.getLayout() == null) return;
+        if (pageReader != null) { pageReader.turn(direction); return; }
+        if (body == null || body.getLayout() == null) return;
         int height = Math.max(dp(48), textScroll.getHeight() - dp(24));
         int y = Math.max(0, textScroll.getScrollY() + direction * height - body.getPaddingTop());
         int line = body.getLayout().getLineForVertical(y);
@@ -1015,15 +1112,7 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 27 && options.light()) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
         if (enabled) flags |= View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
         getWindow().getDecorView().setSystemUiVisibility(flags);
-        if (!focus && textScroll != null) {
-            int version = renderVersion;
-            restoring = true;
-            body.post(() -> {
-                if (version != renderVersion) return;
-                restoreAnchor();
-                body.post(() -> { if (version == renderVersion) restoring = false; });
-            });
-        }
+        if (!focus && textScroll != null) restoreAfterLayout();
     }
     private void readerMenu() {
         pause();
@@ -1392,8 +1481,9 @@ public class MainActivity extends Activity {
                     value -> { options.put("paragraphGap", value); changedOptions(); });
             choose(content, tr("Выравнивание", "Alignment"), new String[]{tr("По левому краю", "Start"), tr("По ширине", "Justified"), tr("По центру", "Centered")},
                     options.number("alignment", 0), value -> { options.put("alignment", value); changedOptions(); });
-            toggle(content, tr("Читать перелистыванием", "Read with page buttons"), options.flag("pages", false),
-                    value -> { options.put("pages", value); changedOptions(); });
+            choose(content, tr("Режим чтения", "Reading mode"), new String[]{tr("Прокрутка", "Scroll"), tr("Страницы", "Pages")},
+                    options.flag("pages", false) ? 1 : 0,
+                    value -> { options.put("pages", value == 1); changedOptions(); });
             toggle(content, tr("Листать кнопками громкости", "Turn pages with volume keys"), options.flag("volumePages", false),
                     value -> { options.put("volumePages", value); persistOptions(); });
             content.addView(label(tr("В режиме перелистывания: края — страницы, центр — панели. Удержание текста — цитата.",

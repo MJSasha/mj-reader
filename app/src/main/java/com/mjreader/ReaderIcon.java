@@ -32,6 +32,7 @@ final class ReaderIcon extends Drawable {
             case "Коллекции", "Collections", "Новая коллекция", "+ Новая коллекция", "+ New collection", "Новая", "New" -> "folder";
             case "Удалённые", "Deleted", "Удалить", "Delete" -> "trash";
             case "Название и автор", "Title & author" -> "edit";
+            case "Повторный импорт", "Reimport" -> "history";
             case "Сбросить прогресс", "Reset progress", "С начала", "Read again", "Вернуть", "Restore", "Отменить удаление", "Undo delete", "Вернуться к месту", "Return to previous place" -> "history";
             case "Оформление", "Appearance", "Цвет и атмосфера", "Color & atmosphere" -> "palette";
             case "Типографика", "Typography", "Отображение слова", "Word display" -> "type";

@@ -97,7 +97,7 @@ final class EpubCover {
         return null;
     }
 
-    private static String resolve(String base, String href) {
+    static String resolve(String base, String href) {
         try {
             URI target = new URI(base.replace(" ", "%20")).resolve(href.replace(" ", "%20")).normalize();
             return target.isAbsolute() || target.getAuthority() != null ? null : target.getPath();

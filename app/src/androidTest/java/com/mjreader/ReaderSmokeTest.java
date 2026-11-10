@@ -32,7 +32,7 @@ public class ReaderSmokeTest extends Instrumentation {
         try {
             Context context = getTargetContext();
             if (showcaseOnly) { showcase(); result.putString("stream", "PASS: original demonstration screenshots\n"); finish(Activity.RESULT_OK, result); return; }
-            if (adaptiveOnly) { adaptiveCheck(); result.putString("stream", "PASS: phone/Fold/tablet resize, grid, reader position/fullscreen, catalog retention, hover/focus and touch targets\n"); finish(Activity.RESULT_OK, result); return; }
+            if (adaptiveOnly) { adaptiveCheck(); pagesCheck(); result.putString("stream", "PASS: phone/Fold/tablet resize, grid, reader position/fullscreen, EPUB illustration repair, exact page seams, one/two-page reflow, catalog retention, hover/focus and touch targets\n"); finish(Activity.RESULT_OK, result); return; }
             if (catalogOnly) { new CatalogCheck(this).run(liveCatalog); result.putString("stream", "PASS: OPDS failover, HTTPS EPUB download, cover/chapters import, cancellation/retry, background import, themed UI and recreation\n"); finish(Activity.RESULT_OK, result); return; }
             if (benchmarkOnly) {
                 benchmarkCheck(result);
@@ -101,6 +101,51 @@ public class ReaderSmokeTest extends Instrumentation {
             MainActivity activity = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             waitForIdleSync();
             awaitField(activity, "librarySearch");
+            // Reimport is an action on this book, not a second unrestricted Add book flow.
+            Uri repairSource = createDocument("repair-menu.epub", buffer.toByteArray());
+            Uri wrongSource = createDocument("different-book.txt", "This is a different edition and must not be added.".getBytes(StandardCharsets.UTF_8));
+            int beforeReimport = store.list().size();
+            try {
+                try { store.importBook(wrongSource, epub.id()); throw new AssertionError("Different book accepted for repair"); }
+                catch (Books.DifferentBook expected) { }
+                if (store.list().size() != beforeReimport) throw new AssertionError("Rejected repair added a book");
+                JSONObject damaged = new JSONObject(new String(java.nio.file.Files.readAllBytes(legacyFile.toPath()), StandardCharsets.UTF_8));
+                damaged.remove("cover");
+                java.nio.file.Files.write(legacyFile.toPath(), damaged.toString().getBytes(StandardCharsets.UTF_8));
+                prefs.edit().putInt("anchor." + epub.id(), 73).putString("bookmarks." + epub.id(), "[{\"offset\":73,\"note\":\"Keep me\"}]").commit();
+                IntentFilter documentPicker = new IntentFilter(Intent.ACTION_OPEN_DOCUMENT);
+                documentPicker.addCategory(Intent.CATEGORY_OPENABLE);
+                documentPicker.addDataType("*/*");
+                ActivityMonitor picker = addMonitor(documentPicker,
+                        new ActivityResult(Activity.RESULT_OK, new Intent().setData(repairSource)), true);
+                try {
+                    runOnMainSync(() -> invoke(activity, "bookMenu", new Class[]{Books.Book.class}, epub));
+                    capture("book-reimport-menu");
+                    clickSystem("Reimport");
+                    for (int i = 0; i < 100; i++) {
+                        waitForIdleSync();
+                        if (picker.getHits() > 0 && !(boolean) field(activity, "importing") && field(activity, "current") != null) break;
+                        Thread.sleep(100);
+                    }
+                    if (picker.getHits() != 1) throw new AssertionError("Reimport did not open the document picker");
+                } finally { removeMonitor(picker); }
+                Books.Book repaired = (Books.Book) field(activity, "current");
+                if (repaired == null || !repaired.id().equals(epub.id()) || !repaired.text().equals(epub.text()) || repaired.cover() == null
+                        || store.list().size() != beforeReimport || prefs.getInt("anchor." + epub.id(), 0) != 73
+                        || !prefs.getString("bookmarks." + epub.id(), "").contains("Keep me"))
+                    throw new AssertionError("Reimport menu failed to preserve the book or restore metadata");
+                runOnMainSync(() -> invoke(activity, "library"));
+                ActivityMonitor canceled = addMonitor(documentPicker, new ActivityResult(Activity.RESULT_CANCELED, null), true);
+                try {
+                    runOnMainSync(() -> invoke(activity, "bookMenu", new Class[]{Books.Book.class}, epub));
+                    clickSystem("Reimport"); waitForIdleSync();
+                    if (field(activity, "reimportId") != null || (boolean) field(activity, "importing"))
+                        throw new AssertionError("Canceled reimport left pending state");
+                } finally { removeMonitor(canceled); }
+            } finally {
+                context.getContentResolver().delete(repairSource, null, null);
+                context.getContentResolver().delete(wrongSource, null, null);
+            }
             Uri first = createDocument("bulk-one.txt", (text + " bulk-one").getBytes(StandardCharsets.UTF_8));
             Uri second = createDocument("bulk-two.txt", (text + " bulk-two").getBytes(StandardCharsets.UTF_8));
             Uri invalid = createDocument("invalid.epub", new byte[]{1, 2, 3});
@@ -211,7 +256,7 @@ public class ReaderSmokeTest extends Instrumentation {
             click(reopened, "Станция «Тишина»");
             awaitField(reopened, "reading");
             waitForIdleSync();
-            if ((int) field(reopened, "anchor") != ruAnchor) throw new AssertionError("Relaunch lost position");
+            if ((int) field(reopened, "anchor") != ruAnchor) throw new AssertionError("Relaunch lost position: " + ruAnchor + " -> " + field(reopened, "anchor"));
             Thread.sleep(400);
             try (FileOutputStream screenshot = new FileOutputStream(new File(context.getFilesDir(), "qa-reader.png"))) {
                 getUiAutomation().takeScreenshot().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, screenshot);
@@ -251,7 +296,7 @@ public class ReaderSmokeTest extends Instrumentation {
                 capture("covers-" + theme);
             }
             runOnMainSync(reopened::finish);
-            result.putString("stream", "PASS: batch/invalid-file imports, duplicates, EPUB covers/navigation, rename/collections/favorite/status/delete/undo, in-book search, RU/EN RSVP, search library, bookmark, jump history, reflow anchor, per-book settings, relaunch position\n");
+            result.putString("stream", "PASS: batch/invalid-file imports, targeted reimport menu/cancel/wrong file, duplicates, EPUB covers/navigation, rename/collections/favorite/status/delete/undo, in-book search, RU/EN RSVP, search library, bookmark, jump history, reflow anchor, per-book settings, relaunch position\n");
             finish(Activity.RESULT_OK, result);
         } catch (Throwable error) {
             result.putString("stream", android.util.Log.getStackTraceString(error));
@@ -325,6 +370,7 @@ public class ReaderSmokeTest extends Instrumentation {
         click(activity, "Сияние");
         awaitField(activity, "reading"); waitForIdleSync();
         long elapsed = android.os.SystemClock.elapsedRealtime() - started;
+        awaitField(activity, "body");
         int rendered = ((TextView) field(activity, "body")).length();
         result.putString("stream", "OPEN_MS=" + elapsed + " RENDERED_CHARS=" + rendered + "\n");
         runOnMainSync(activity::finish);
@@ -396,13 +442,16 @@ public class ReaderSmokeTest extends Instrumentation {
             invoke(activity, "changedOptions");
         });
         waitForIdleSync();
-        int before = ((ScrollView) field(activity, "textScroll")).getScrollY();
+        awaitPages(activity);
+        int before = (int) field(activity, "anchor");
         sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_VOLUME_DOWN);
         waitForIdleSync();
-        if (((ScrollView) field(activity, "textScroll")).getScrollY() <= before) throw new AssertionError("Volume did not turn page");
-        before = ((ScrollView) field(activity, "textScroll")).getScrollY();
+        awaitPages(activity);
+        if ((int) field(activity, "anchor") <= before) throw new AssertionError("Volume did not turn page");
+        before = (int) field(activity, "anchor");
         tapReading(activity, .9f);
-        if (((ScrollView) field(activity, "textScroll")).getScrollY() <= before) throw new AssertionError("Edge tap did not turn page");
+        awaitPages(activity);
+        if ((int) field(activity, "anchor") <= before) throw new AssertionError("Edge tap did not turn page");
         int anchor = (int) field(activity, "anchor");
         tapReading(activity, .5f);
         if (!(boolean) field(activity, "fullscreen")) throw new AssertionError("Center tap did not hide controls");
@@ -410,7 +459,10 @@ public class ReaderSmokeTest extends Instrumentation {
         runOnMainSync(activity::onBackPressed);
         waitForIdleSync();
         if ((int) field(activity, "anchor") != anchor) throw new AssertionError("Fullscreen changed anchor");
-        runOnMainSync(() -> invoke(activity, "jump", new Class[]{int.class}, book.text().length() / 2));
+        runOnMainSync(() -> {
+            ((ReaderOptions) field(activity, "options")).put("pages", false);
+            invoke(activity, "jump", new Class[]{int.class}, book.text().length() / 2);
+        });
         waitForIdleSync();
         int oldStart = (int) field(activity, "textStart"), oldEnd = (int) field(activity, "textEnd");
         int[] expectedAnchor = {0};
@@ -461,7 +513,8 @@ public class ReaderSmokeTest extends Instrumentation {
         int[] location = new int[2];
         float[] point = new float[2];
         runOnMainSync(() -> {
-            ScrollView scroll = (ScrollView) field(activity, "textScroll");
+            View scroll = (View) field(activity, "pageReader");
+            if (scroll == null) scroll = (View) field(activity, "textScroll");
             scroll.getLocationOnScreen(location);
             point[0] = location[0] + scroll.getWidth() * fraction;
             point[1] = location[1] + scroll.getHeight() / 2f;
@@ -600,7 +653,7 @@ public class ReaderSmokeTest extends Instrumentation {
                 new Books.Book("showcase-stars", "Город между звёздами", "MJReader Originals", ru.text()));
         MainActivity activity = null;
         try {
-            prefs.edit().putString("options", "{\"theme\":0,\"size\":21,\"countdown\":false}").putBoolean("grid", true)
+            prefs.edit().putString("options", "{\"theme\":0,\"size\":21,\"countdown\":false,\"pages\":true}").putBoolean("grid", true)
                     .putString("status.showcase-ru", "reading").putInt("anchor.showcase-ru", ru.text().length() / 3).apply();
             activity = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             awaitField(activity, "librarySearch"); MainActivity screen = activity;
@@ -609,7 +662,7 @@ public class ReaderSmokeTest extends Instrumentation {
             runOnMainSync(() -> { ((ReaderOptions) field(screen, "options")).put("theme", 2); invoke(screen, "changedOptions"); invoke(screen, "library"); });
             waitForIdleSync(); capture("showcase-library-light");
             runOnMainSync(() -> invoke(screen, "open", new Class[]{Books.Book.class, boolean.class}, demo.get(0), false));
-            awaitField(screen, "body"); waitForIdleSync();
+            awaitPages(screen); waitForIdleSync();
             runOnMainSync(() -> { ReaderOptions options = (ReaderOptions) field(screen, "options"); options.put("theme", 3); invoke(screen, "changedOptions"); invoke(screen, "jump", new Class[]{int.class}, 0); });
             waitForIdleSync(); capture("showcase-reading");
             runOnMainSync(() -> { ((ReaderOptions) field(screen, "options")).put("theme", 0); invoke(screen, "changedOptions"); setField(screen, "focus", true); invoke(screen, "reader"); });
@@ -670,7 +723,7 @@ public class ReaderSmokeTest extends Instrumentation {
             waitForIdleSync(); int anchor = (int) field(current, "anchor");
             screen = resize(current, "800x900"); awaitField(screen, "body"); waitForIdleSync();
             if (Math.abs((int) field(screen, "anchor") - anchor) > 100 || !(boolean) field(screen, "fullscreen")) throw new AssertionError("Reading position/fullscreen lost on unfold");
-            if (((TextView) field(screen, "body")).getWidth() > 710 * context.getResources().getDisplayMetrics().density) throw new AssertionError("Reader line too wide");
+            if (field(screen, "pageReader") != null || ((TextView) field(screen, "body")).getWidth() > 710 * context.getResources().getDisplayMetrics().density) throw new AssertionError("Default scrolling or bounded width lost");
             capture("adaptive-reader-wide");
             screen = resize(screen, "740x900"); awaitField(screen, "body"); waitForIdleSync();
             if (Math.abs((int) field(screen, "anchor") - anchor) > 100 || !(boolean) field(screen, "fullscreen")) throw new AssertionError("Reader anchor lost on small resize");
@@ -707,6 +760,189 @@ public class ReaderSmokeTest extends Instrumentation {
             for (Books.Book book : fixtures) new File(context.getFilesDir(), "books/" + book.id() + ".json").delete();
             prefs.edit().putString("options", oldOptions).putBoolean("grid", oldGrid).commit();
             shell("wm size 430x932");
+        }
+    }
+    private ReaderPages awaitPages(MainActivity activity) throws Exception {
+        waitForIdleSync();
+        for (int i = 0; i < 100; i++) {
+            ReaderPages[] found = {null};
+            runOnMainSync(() -> { ReaderPages view = (ReaderPages) field(activity, "pageReader"); if (view != null && view.ready()) found[0] = view; });
+            if (found[0] != null) return found[0];
+            Thread.sleep(50);
+        }
+        throw new AssertionError("Pages were not laid out");
+    }
+    private void pagesCheck() throws Exception {
+        Context context = getTargetContext();
+        var prefs = context.getSharedPreferences("reader", 0);
+        String oldOptions = prefs.getString("options", "{}");
+        Books store = new Books(context);
+        Books.Book book = null;
+        MainActivity screen = null;
+        try {
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            try (ZipOutputStream zip = new ZipOutputStream(buffer)) {
+                entry(zip, "META-INF/container.xml", "<container><rootfiles><rootfile full-path='OPS/book.opf'/></rootfiles></container>");
+                entry(zip, "OPS/book.opf", "<package><metadata><title>Illustrated Orbit</title></metadata><manifest><item id='a' href='chapter.xhtml'/></manifest><spine><itemref idref='a'/></spine></package>");
+                entry(zip, "OPS/chapter.xhtml", "<html><body><h1><img src='art.png' alt='The observatory'/></h1><p>" +
+                        "Maya opened the observatory. Stars filled the window. ".repeat(240) + "</p><p><img src='art.png' alt='The stars'/></p><p>The last page.</p></body></html>");
+                android.graphics.Bitmap art = android.graphics.Bitmap.createBitmap(600, 240, android.graphics.Bitmap.Config.ARGB_8888);
+                android.graphics.Canvas canvas = new android.graphics.Canvas(art); canvas.drawColor(0xff18334b);
+                android.graphics.Paint paint = new android.graphics.Paint(); paint.setColor(0xffc7ff68);
+                canvas.drawCircle(300, 120, 80, paint);
+                zip.putNextEntry(new ZipEntry("OPS/art.png")); art.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, zip); zip.closeEntry(); art.recycle();
+            }
+            book = checkImport(store, "illustrated-orbit.epub", buffer.toByteArray(), "Maya opened");
+            if (!book.chapters().get(0).title().equals("The observatory") || book.illustrations().size() != 2)
+                throw new AssertionError("Image heading / inline images lost");
+            for (Books.Illustration image : book.illustrations()) if (book.text().charAt(image.offset()) != '\uFFFC') throw new AssertionError("Image offset changed");
+            File stored = new File(context.getFilesDir(), "books/" + book.id() + ".json");
+            JSONObject legacy = new JSONObject(new String(java.nio.file.Files.readAllBytes(stored.toPath()), StandardCharsets.UTF_8));
+            legacy.remove("images"); legacy.remove("illustrations");
+            legacy.getJSONArray("chapters").getJSONObject(0).put("title", "\uFFFC");
+            java.nio.file.Files.write(stored.toPath(), legacy.toString().getBytes(StandardCharsets.UTF_8));
+            prefs.edit().putInt("anchor." + book.id(), 73).putString("bookmarks." + book.id(), "[{\"offset\":73,\"note\":\"Saved\"}]").commit();
+            Books.Book repaired = checkImport(store, "illustrated-repair.epub", buffer.toByteArray(), "Maya opened");
+            if (!repaired.id().equals(book.id()) || !repaired.text().equals(book.text()) || repaired.illustrations().size() != 2
+                    || prefs.getInt("anchor." + book.id(), 0) != 73 || !prefs.getString("bookmarks." + book.id(), "").contains("Saved"))
+                throw new AssertionError("Repair changed identity/progress or lost images");
+            book = repaired;
+            prefs.edit().putString("options", "{\"pages\":true,\"size\":21,\"volumePages\":true}").putInt("anchor." + book.id(), 0).commit();
+            screen = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            awaitField(screen, "librarySearch");
+            MainActivity opened = screen; Books.Book fixture = book;
+            runOnMainSync(() -> invoke(opened, "open", new Class[]{Books.Book.class, boolean.class}, fixture, false));
+            ReaderPages pages = awaitPages(screen);
+            if (pages.columns() != 1) throw new AssertionError("Phone should show one page");
+            android.text.Spanned first = (android.text.Spanned) pages.visiblePages().get(0).layout().getText();
+            ReaderText.Picture[] pictures = first.getSpans(0, pages.visiblePages().get(0).end(), ReaderText.Picture.class);
+            if (pictures.length == 0 || pictures[0].bitmap == null) throw new AssertionError("Visible illustration not decoded");
+            capture("pages-illustration-dark");
+            for (int theme : new int[]{2, 0}) {
+                runOnMainSync(() -> {
+                    ((ReaderOptions) field(opened, "options")).put("theme", theme); invoke(opened, "changedOptions");
+                }); awaitPages(screen);
+                runOnMainSync(() -> {
+                    ViewGroup dock = (ViewGroup) field(opened, "footer");
+                    ViewGroup actions = (ViewGroup) dock.getChildAt(dock.getChildCount() - 1);
+                    for (int i = 0; i < actions.getChildCount(); i++) if (actions.getChildAt(i) instanceof Button button) {
+                        var background = (android.graphics.drawable.LayerDrawable) button.getBackground();
+                        android.graphics.Rect icon = background.getDrawable(1).getBounds();
+                        if (Math.abs(icon.centerX() - button.getWidth() / 2) > 1 || Math.abs(icon.centerY() - button.getHeight() / 2) > 1)
+                            throw new AssertionError("Action icon is outside the center of its hit target");
+                        button.setHovered(true);
+                    }
+                });
+                capture("pages-hover-" + theme);
+                checkPageAnimation(opened, "phone-" + theme);
+            }
+            // Every forward turn starts exactly after the last displayed line; back returns exactly.
+            for (int i = 0; i < 12; i++) {
+                pages = awaitPages(screen); int start = pages.start(), stop = pages.end();
+                if (stop >= book.text().length()) break;
+                ReaderPages view = pages;
+                runOnMainSync(() -> view.turn(1)); pages = awaitPages(screen);
+                if (pages.start() != stop || pages.end() <= stop) throw new AssertionError("Skipped/repeated page seam");
+                runOnMainSync(() -> view.turn(-1)); pages = awaitPages(screen);
+                if (pages.start() != start) throw new AssertionError("Back page changed anchor");
+                runOnMainSync(() -> view.turn(1)); awaitPages(screen);
+            }
+            int saved = (int) field(screen, "anchor");
+            screen = resize(screen, "800x900"); pages = awaitPages(screen);
+            if (pages.columns() != 2 || pages.start() != saved || pages.visiblePages().size() != 2
+                    || pages.visiblePages().get(0).end() != pages.visiblePages().get(1).start()) throw new AssertionError("Broken unfolded spread");
+            capture("pages-spread-dark");
+            checkPageAnimation(screen, "spread-dark");
+            ReaderPages unfolded = pages;
+            runOnMainSync(() -> unfolded.turn(-1)); pages = awaitPages(screen);
+            if (pages.end() != saved) throw new AssertionError("Backward reflow must end at former anchor");
+            runOnMainSync(() -> unfolded.turn(1)); pages = awaitPages(screen);
+            if (pages.start() != saved) throw new AssertionError("Forward after reflow lost former anchor");
+            runOnMainSync(() -> unfolded.turn(-1));
+            android.animation.ValueAnimator interrupted = awaitPageAnimation(unfolded);
+            runOnMainSync(interrupted::pause);
+            saved = unfolded.start();
+            screen = resize(screen, "740x900"); pages = awaitPages(screen);
+            if (pages.start() != saved || pages.columns() != 2) throw new AssertionError("Small resize lost spread position");
+            screen = resize(screen, "430x932"); pages = awaitPages(screen);
+            if (pages.start() != saved || pages.columns() != 1) throw new AssertionError("Fold lost position");
+            MainActivity normal = screen;
+            runOnMainSync(() -> { invoke(normal, "setFullscreen", new Class[]{boolean.class}, true); }); awaitPages(screen);
+            runOnMainSync(() -> { invoke(normal, "setFullscreen", new Class[]{boolean.class}, false); }); awaitPages(screen);
+            if ((int) field(screen, "anchor") != saved) throw new AssertionError("Fullscreen lost page position");
+            runOnMainSync(() -> invoke(normal, "settings", new Class[]{boolean.class}, false));
+            click(normal, "Pages"); click(normal, "Scroll");
+            runOnMainSync(normal::onBackPressed); waitForIdleSync();
+            awaitField(normal, "body"); Thread.sleep(200); waitForIdleSync();
+            if (field(normal, "pageReader") != null || (int) field(normal, "anchor") != saved)
+                throw new AssertionError("Switch to scroll lost position");
+            runOnMainSync(() -> {
+                ScrollView scroll = (ScrollView) field(normal, "textScroll");
+                scroll.scrollBy(0, 200);
+            }); waitForIdleSync();
+            int scrolled = (int) field(normal, "anchor");
+            if (scrolled <= saved) throw new AssertionError("Continuous scrolling no longer works");
+            runOnMainSync(() -> invoke(normal, "settings", new Class[]{boolean.class}, false));
+            click(normal, "Scroll"); click(normal, "Pages");
+            runOnMainSync(normal::onBackPressed); pages = awaitPages(normal);
+            if (pages.start() != scrolled) throw new AssertionError("Switch to pages lost position");
+            runOnMainSync(normal::finish); screen = null;
+            // Large text, paper theme, short landscape and reduced motion.
+            for (String size : new String[]{"430x932", "740x360"}) {
+                shell("wm size " + size); shell("settings put system font_scale 2.0"); shell("settings put global animator_duration_scale 0");
+                prefs.edit().putString("options", "{\"pages\":true,\"theme\":2,\"size\":21}").putInt("anchor." + book.id(), 0).commit();
+                screen = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                awaitField(screen, "librarySearch"); MainActivity large = screen;
+                runOnMainSync(() -> invoke(large, "open", new Class[]{Books.Book.class, boolean.class}, fixture, false));
+                pages = awaitPages(screen);
+                if (pages.columns() != 1 || pages.end() <= pages.start()) throw new AssertionError("Large-text pagination failed");
+                assertTouchTargets(screen.getWindow().getDecorView());
+                capture("pages-large-light-" + size);
+                ReaderPages still = pages; int nextPage = pages.end();
+                runOnMainSync(() -> still.turn(1)); pages = awaitPages(large);
+                if (field(pages, "pageTurn") != null || pages.start() != nextPage)
+                    throw new AssertionError("Reduced motion must switch pages immediately");
+                runOnMainSync(large::finish); screen = null;
+            }
+        } finally {
+            if (screen != null) { MainActivity end = screen; runOnMainSync(end::finish); }
+            if (book != null) new File(context.getFilesDir(), "books/" + book.id() + ".json").delete();
+            prefs.edit().putString("options", oldOptions).commit();
+            shell("wm size 430x932"); shell("settings put system font_scale 1.0"); shell("settings put global animator_duration_scale 1");
+        }
+    }
+    private android.animation.ValueAnimator awaitPageAnimation(ReaderPages pages) throws Exception {
+        for (int i = 0; i < 100; i++) {
+            android.animation.ValueAnimator[] animation = {null};
+            runOnMainSync(() -> {
+                Object turn = field(pages, "pageTurn");
+                if (turn != null) animation[0] = (android.animation.ValueAnimator) field(turn, "animator");
+            });
+            if (animation[0] != null) return animation[0];
+            Thread.sleep(10);
+        }
+        throw new AssertionError("Missing book turn animation");
+    }
+    private void checkPageAnimation(MainActivity activity, String name) throws Exception {
+        ReaderPages view = awaitPages(activity);
+        int start = view.start(), end = view.end();
+        for (int direction : new int[]{1, -1}) {
+            runOnMainSync(() -> view.turn(direction));
+            android.animation.ValueAnimator animation = awaitPageAnimation(view);
+            android.graphics.Bitmap[] frames = new android.graphics.Bitmap[2];
+            runOnMainSync(() -> {
+                animation.pause();
+                for (int i = 0; i < 2; i++) {
+                    animation.setCurrentFraction(i == 0 ? 0f : .42f);
+                    frames[i] = android.graphics.Bitmap.createBitmap(view.getWidth(), view.getHeight(), android.graphics.Bitmap.Config.ARGB_8888);
+                    view.draw(new android.graphics.Canvas(frames[i]));
+                }
+            });
+            if (frames[0].sameAs(frames[1]) || view.ready()) throw new AssertionError("Turn has no visible intermediate frame");
+            frames[0].recycle(); frames[1].recycle();
+            capture("page-turn-" + name + "-" + direction);
+            runOnMainSync(animation::resume); awaitPages(activity);
+            if (view.start() != (direction > 0 ? end : start)) throw new AssertionError("Animated turn changed page seam");
         }
     }
     private MainActivity resize(MainActivity activity, String size) throws Exception {
@@ -905,7 +1141,7 @@ public class ReaderSmokeTest extends Instrumentation {
         zip.closeEntry();
     }
     private TextView find(View view, String text) {
-        if (view instanceof TextView label && !(view instanceof EditText) && label.getText().toString().equals(text)) return label;
+        if (view instanceof TextView label && !(view instanceof EditText) && (label.getText().toString().equals(text) || text.equals(label.getContentDescription()))) return label;
         if (view instanceof ViewGroup group)
             for (int i = 0; i < group.getChildCount(); i++) {
                 TextView found = find(group.getChildAt(i), text);

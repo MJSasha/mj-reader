@@ -35,7 +35,10 @@ final class ReaderText {
             if (end < 0) end = text.length();
             boolean heading = false;
             for (int[] range : headings) if (start >= range[0] && start < range[1]) { heading = true; break; }
-            if (end > start && indent > 0 && !heading)
+            boolean illustration = end > start && fragment.substring(start, end).trim().equals("\uFFFC");
+            if (illustration) text.setSpan(new AlignmentSpan.Standard(Layout.Alignment.ALIGN_CENTER), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            if (end > start && indent > 0 && !heading && !illustration
+                    && (start > 0 || from == 0 || book.text().charAt(from - 1) == '\n'))
                 text.setSpan(new LeadingMarginSpan.Standard(indent, 0), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             start = end + 1;
         }
@@ -47,6 +50,65 @@ final class ReaderText {
             if (blank) { fm.ascent = -paragraphGap; fm.top = -paragraphGap; fm.descent = 0; fm.bottom = 0; }
         }, 0, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         return text;
+    }
+
+    /** Sizing uses image headers only; pixels are decoded for visible pages on the worker. */
+    static void illustrate(Books.Book book, SpannableString text, int from, int width, int height) {
+        Map<Integer, Books.Illustration> images = new HashMap<>();
+        for (Books.Illustration image : book.illustrations())
+            if (image.offset() >= from && image.offset() < from + text.length()) images.put(image.offset() - from, image);
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) != '\uFFFC') continue;
+            text.setSpan(new Picture(images.get(i), width, height), i, i + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+    }
+    static void loadPictures(Spanned text, int from, int to) {
+        for (Picture picture : text.getSpans(0, text.length(), Picture.class)) {
+            int start = text.getSpanStart(picture);
+            if (start >= from && start < to) picture.load();
+            else picture.bitmap = null;
+        }
+    }
+    static final class Picture extends ReplacementSpan {
+        final Books.Illustration image;
+        final int width, height;
+        volatile android.graphics.Bitmap bitmap;
+        private final android.graphics.Paint imagePaint = new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG);
+        private final android.graphics.RectF destination = new android.graphics.RectF();
+        Picture(Books.Illustration image, int maxWidth, int maxHeight) {
+            this.image = image;
+            android.graphics.BitmapFactory.Options bounds = new android.graphics.BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            if (image != null) android.graphics.BitmapFactory.decodeByteArray(image.bytes(), 0, image.bytes().length, bounds);
+            float ratio = bounds.outWidth > 0 && bounds.outHeight > 0 ? Math.min(1f,
+                    Math.min(maxWidth / (float) bounds.outWidth, Math.max(1, maxHeight - 64) / (float) bounds.outHeight)) : 0;
+            width = Math.round(Math.max(0, bounds.outWidth) * ratio);
+            height = Math.round(Math.max(0, bounds.outHeight) * ratio);
+        }
+        void load() {
+            if (bitmap != null || image == null || width == 0 || height == 0) return;
+            android.graphics.BitmapFactory.Options decode = new android.graphics.BitmapFactory.Options();
+            decode.inJustDecodeBounds = true;
+            byte[] bytes = image.bytes();
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.length, decode);
+            decode.inSampleSize = 1;
+            while (decode.outWidth / decode.inSampleSize > Math.min(width * 2, 1536)
+                    || decode.outHeight / decode.inSampleSize > Math.min(height * 2, 1536)) decode.inSampleSize *= 2;
+            decode.inJustDecodeBounds = false;
+            bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.length, decode);
+        }
+        @Override public int getSize(android.graphics.Paint paint, CharSequence text, int start, int end, android.graphics.Paint.FontMetricsInt fm) {
+            if (fm != null && height > 0) { fm.ascent = -height; fm.top = -height; fm.descent = 0; fm.bottom = 0; }
+            return width;
+        }
+        @Override public void draw(android.graphics.Canvas canvas, CharSequence text, int start, int end,
+                                   float x, int top, int y, int bottom, android.graphics.Paint paint) {
+            android.graphics.Bitmap ready = bitmap;
+            if (ready != null) {
+                destination.set(x, y - height, x + width, y);
+                canvas.drawBitmap(ready, null, destination, imagePaint);
+            }
+        }
     }
 
     static int[] window(String text, int anchor) {
