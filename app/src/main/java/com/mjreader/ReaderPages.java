@@ -44,7 +44,9 @@ final class ReaderPages extends View {
         gestures = new GestureDetector(context, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onDown(MotionEvent event) { return true; }
             @Override public boolean onSingleTapUp(MotionEvent event) {
-                performClick();
+                if (event.getX() < getWidth() * .25f) turn(-1);
+                else if (event.getX() > getWidth() * .75f) turn(1);
+                else performClick();
                 return true;
             }
             @Override public void onLongPress(MotionEvent event) {

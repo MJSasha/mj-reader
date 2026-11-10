@@ -1481,8 +1481,8 @@ public class MainActivity extends Activity {
                     value -> { options.put("pages", value == 1); changedOptions(); });
             toggle(content, tr("Листать кнопками громкости", "Turn pages with volume keys"), options.flag("volumePages", false),
                     value -> { options.put("volumePages", value); persistOptions(); });
-            content.addView(label(tr("В режиме листания: стрелки — страницы. Нажатие на текст — панели, удержание — цитата.",
-                    "Page mode: use arrows to turn pages. Tap text for controls; hold to save a quote."), 14, options.muted()));
+            content.addView(label(tr("В режиме листания: стрелки и края — страницы, центр — панели. Удержание текста — цитата.",
+                    "Page mode: arrows or edge taps turn pages, center toggles controls. Hold text to save a quote."), 14, options.muted()));
             content = settingsGroup(page, tr("Экран", "Display"));
             range(content, tr("Яркость, 0 = системная", "Brightness, 0 = system"), 0, 100, options.number("brightness", 0),
                     value -> { options.put("brightness", value); persistOptions(); applyWindow(); });

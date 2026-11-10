@@ -819,11 +819,7 @@ public class ReaderSmokeTest extends Instrumentation {
             ReaderText.Picture[] pictures = first.getSpans(0, pages.visiblePages().get(0).end(), ReaderText.Picture.class);
             if (pictures.length == 0 || pictures[0].bitmap == null) throw new AssertionError("Visible illustration not decoded");
             capture("pages-illustration-dark");
-            int beforeTap = pages.start();
-            tapReading(opened, .9f); awaitPages(opened);
-            if ((int) field(opened, "anchor") != beforeTap || !(boolean) field(opened, "fullscreen"))
-                throw new AssertionError("Edge tap must toggle panels without turning a page");
-            tapReading(opened, .5f); awaitPages(opened);
+            checkEdgeTaps(opened);
 
             for (int theme : new int[]{2, 0}) {
                 runOnMainSync(() -> {
@@ -859,6 +855,7 @@ public class ReaderSmokeTest extends Instrumentation {
             if (pages.columns() != 2 || pages.start() != saved || pages.visiblePages().size() != 2
                     || pages.visiblePages().get(0).end() != pages.visiblePages().get(1).start()) throw new AssertionError("Broken unfolded spread");
             capture("pages-spread-dark");
+            checkEdgeTaps(screen);
             checkPageAnimation(screen, "spread-dark");
             ReaderPages unfolded = pages;
             runOnMainSync(() -> unfolded.turn(-1)); pages = awaitPages(screen);
@@ -920,6 +917,21 @@ public class ReaderSmokeTest extends Instrumentation {
             if (book != null) new File(context.getFilesDir(), "books/" + book.id() + ".json").delete();
             prefs.edit().putString("options", oldOptions).commit();
             shell("wm size 430x932"); shell("settings put system font_scale 1.0"); shell("settings put global animator_duration_scale 1");
+        }
+    }
+    private void checkEdgeTaps(MainActivity activity) throws Exception {
+        for (boolean fullscreen : new boolean[]{false, true}) {
+            ReaderPages pages = awaitPages(activity);
+            int start = pages.start(), end = pages.end();
+            tapReading(activity, .9f); pages = awaitPages(activity);
+            if (pages.start() != end || (boolean) field(activity, "fullscreen") != fullscreen)
+                throw new AssertionError("Right edge must turn forward without toggling panels");
+            tapReading(activity, .1f); pages = awaitPages(activity);
+            if (pages.start() != start || (boolean) field(activity, "fullscreen") != fullscreen)
+                throw new AssertionError("Left edge must return without toggling panels");
+            tapReading(activity, .5f); pages = awaitPages(activity);
+            if (pages.start() != start || (boolean) field(activity, "fullscreen") == fullscreen)
+                throw new AssertionError("Center must toggle panels without turning a page");
         }
     }
     private android.animation.ValueAnimator awaitPageAnimation(ReaderPages pages) throws Exception {
