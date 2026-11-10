@@ -8,11 +8,12 @@ Compose, a database library or a torrent runtime. It is a single `:app` Gradle m
 | Component | Responsibility | Important boundary |
 | --- | --- | --- |
 | `MainActivity` | Library, book actions, text reader, RSVP, per-book/global settings | UI thread owns route state; worker handles import/open |
-| `Books` | EPUB/TXT decoding, deduplication, metadata repair and private JSON files | Serialized import; stable ID/full-text offsets |
+| `Books` | EPUB/FB2/TXT decoding, deduplication, metadata repair and private JSON files | Serialized import; stable ID/full-text offsets |
+| `Fb2` | FictionBook metadata, body/notes, chapters and embedded raster assets | Shared protected XML parser; original full-text offsets |
 | `EpubCover` | EPUB cover candidates, wrappers and raster decoding | Bounded input; no remote image fetch |
 | `ReadingText` | RU/EN word boundaries, offsets, RSVP delay | Pure Java; checked on the host JVM |
 | `ReaderText` | Chapter/paragraph/image spans and an approximately 18k-character window | Window-relative UI offsets map back to full text |
-| `ReaderPages` | One/two native page layouts, gestures and accessible page turns | Layout/image decoding on the worker; exact full-text page boundaries |
+| `ReaderPages` | One/two native page layouts, arrow controls and accessible page turns | Layout/image decoding on the worker; exact full-text page boundaries |
 | `ReaderOptions` | JSON settings, semantic colors, interaction states, resize observation | Shared by main reader and catalog |
 | `ReaderDialogs` / `ReaderIcon` | Branded native menus and vector-drawn symbols | Scrolling actions, keyboard and accessibility |
 | `CatalogActivity` | Query, tabs, results, pagination, download status | No duplicate page loads; stale request generations ignored |
@@ -58,7 +59,7 @@ The UI is composed programmatically. Library rows are virtualized with `ListView
 Columns depend on window width and font scale. Paged reading uses one page on phones
 and two pages from 640 dp of available reader width (more for large system fonts).
 Each page lays out at most 18k characters, and only visible illustrations decode pixels.
-Continuous scrolling is the default and keeps a 700 dp maximum measure; the reading-mode selector enables pages. Catalog uses two columns from 720 dp unless large fonts require a list.
+Continuous scrolling is the default and keeps a 700 dp maximum measure; the reading-mode selector enables pages. Scroll has no footer arrows. Pages turn via arrows with a 180 ms horizontal slide of bounded layouts, without bitmap textures or swipe/edge gestures; reduced motion disables the slide. Catalog uses two columns from 720 dp unless large fonts require a list.
 
 Large changes use saved instance state / Activity recreation. Catalog results and
 loaded-page identities also survive configuration changes through non-configuration state.
@@ -71,7 +72,7 @@ Do not derive adapter column counts dynamically while an existing ListView is me
 ## Network and cancellation
 
 Catalog reads use HTTPS with certificate verification. OPDS input is bounded and parsed
-using the shared XML protections. Only explicit EPUB/TXT acquisition links can be downloaded.
+using the shared XML protections. Only explicit EPUB/FB2/TXT acquisition links can be downloaded.
 The parser never executes a catalog page or book script.
 
 Known/user-validated mirrors participate in automatic fallback. Transient failures retry

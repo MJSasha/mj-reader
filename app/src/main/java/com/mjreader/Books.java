@@ -91,15 +91,16 @@ final class Books {
     private Book importBook(String name, byte[] bytes) throws Exception { return importBook(name, bytes, null); }
     private Book importBook(String name, byte[] bytes, String expectedId) throws Exception {
         synchronized (IMPORT_LOCK) {
-        String title = name.replaceFirst("(?i)\\.(epub|txt)$", "");
+        String title = name.replaceFirst("(?i)\\.(epub|txt|fb2(?:\\.zip)?)$", "");
         String author = "";
         String text;
         List<Chapter> chapters = new ArrayList<>();
         byte[] cover = null;
         List<Illustration> illustrations = new ArrayList<>();
         String fingerprint = fingerprint(bytes);
+        Map<String, byte[]> entries = new HashMap<>();
+        boolean fb2 = name.toLowerCase(Locale.ROOT).endsWith(".fb2");
         if (bytes.length >= 2 && bytes[0] == 'P' && bytes[1] == 'K') {
-            Map<String, byte[]> entries = new HashMap<>();
             int total = 0;
             try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
                 ZipEntry entry;
@@ -111,6 +112,19 @@ final class Books {
                     entries.put(entry.getName(), content);
                 }
             }
+            if (!entries.containsKey("META-INF/container.xml")) {
+                List<byte[]> candidates = new ArrayList<>();
+                for (var entry : entries.entrySet())
+                    if (entry.getKey().toLowerCase(Locale.ROOT).endsWith(".fb2")) candidates.add(entry.getValue());
+                if (candidates.size() != 1) throw new IOException("Archive must contain one FB2 book");
+                bytes = candidates.get(0); fb2 = true;
+            }
+        }
+        if (fb2) {
+            Book parsed = Fb2.read(bytes, title);
+            title = parsed.title(); author = parsed.author(); text = parsed.text();
+            chapters = parsed.chapters(); cover = parsed.cover(); illustrations = parsed.illustrations();
+        } else if (!entries.isEmpty()) {
             Document container = xml(entries.get("META-INF/container.xml"));
             String packagePath = ((Element) container.getElementsByTagNameNS("*", "rootfile").item(0))
                     .getAttribute("full-path");
@@ -375,7 +389,8 @@ final class Books {
         scanner.setInput(new ByteArrayInputStream(bytes), null);
         int event;
         while ((event = scanner.nextToken()) != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
-            if (event == org.xmlpull.v1.XmlPullParser.DOCDECL && scanner.getText().contains("["))
+            if (scanner.getDepth() > 128) throw new IOException("XML nesting exceeds limit");
+            else if (event == org.xmlpull.v1.XmlPullParser.DOCDECL && scanner.getText().contains("["))
                 throw new IOException("Internal XML entities are unsupported");
         }
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();

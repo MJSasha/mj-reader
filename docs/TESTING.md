@@ -34,10 +34,10 @@ you want to keep. There is no implicit device selection.
 
 | Suite | Coverage | External requirements |
 | --- | --- | --- |
-| `smoke` | Batch/invalid imports, targeted reimport menu/cancel/wrong-file rejection, TXT encodings, EPUB cover/navigation, duplicates/repair, metadata, collections, reversible deletion, search, bookmarks, RU/EN RSVP, persistence | None |
-| `catalog` | Local HTTPS OPDS, retries/failover, next pages, cover/chapter import, cancellation/retry, background download, keyboard, themes, retained pages | Local test server only |
+| `smoke` | Batch/invalid imports, targeted reimport menu/cancel/wrong-file rejection, TXT/FB2 encodings, FB2.ZIP/embedded assets/chapter offsets/repair/invalid XML, EPUB cover/navigation, duplicates/repair, metadata, collections, reversible deletion, search, bookmarks, RU/EN RSVP, persistence | None |
+| `catalog` | Local HTTPS OPDS, retries/failover, next pages, cover/chapter import, cancellation/retry, background download, zipped FB2 download/import, keyboard, themes, retained pages | Local test server only |
 | `visual` | Library/settings/dialogs, custom selectors, reachable actions, light/dark, settings restoration | None |
-| `adaptive` | 360/540/740/800/900/1040 dp windows, minor and major resizes, reader position/fullscreen, exact page seams, animated forward/back turns in both themes, interrupted turns/reduced motion, one/two-page reflow, illustrated EPUB repair, large-text pages, catalog draft/pages/scroll, control states/targets | Emulator resize permission |
+| `adaptive` | 360/540/740/800/900/1040 dp windows, minor and major resizes, reader position/fullscreen, exact page seams, arrow-driven forward/back slides in both themes, no scroll arrows, interrupted turns/reduced motion, one/two-page reflow, illustrated EPUB repair, large-text pages, catalog draft/pages/scroll, control states/targets | Emulator resize permission |
 
 Run a targeted subset with `--suites catalog,adaptive`. Reports are written under
 `dist/reports/android`: plain logs, JUnit XML and screenshots by suite. A missing `PASS:`

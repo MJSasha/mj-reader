@@ -40,7 +40,7 @@ public class ReaderSmokeTest extends Instrumentation {
             }
             if (readerOnly) {
                 readerCheck();
-                result.putString("stream", "PASS: bounded text windows, long-press book menu, typography, Dusk, quotes, volume/tap paging, fullscreen anchor and search keyboard\n");
+                result.putString("stream", "PASS: bounded text windows, long-press book menu, typography, Dusk, quotes, volume/arrow paging, fullscreen anchor and search keyboard\n");
                 finish(Activity.RESULT_OK, result); return;
             }
             if (sampleOnly) {
@@ -78,6 +78,7 @@ public class ReaderSmokeTest extends Instrumentation {
             Books.Book epub = checkImport(store, "mj-test.epub", buffer.toByteArray(), "Первая глава.");
             if (epub.text().indexOf("Первая") >= epub.text().indexOf("Вторая")) throw new AssertionError("Spine order");
             verifyCoverVariants(epub.cover());
+            fb2Check(store, epub.cover());
             if (epub.cover() == null || !epub.chapters().get(0).title().equals("Начало")) throw new AssertionError("EPUB cover/navigation");
             if (epub.chapters().size() != 2 || epub.chapters().get(1).offset() <= 0) throw new AssertionError("Chapter positions");
             try { checkImport(store, "duplicate.epub", buffer.toByteArray(), "Первая глава."); throw new AssertionError("Duplicate accepted"); }
@@ -296,7 +297,7 @@ public class ReaderSmokeTest extends Instrumentation {
                 capture("covers-" + theme);
             }
             runOnMainSync(reopened::finish);
-            result.putString("stream", "PASS: batch/invalid-file imports, targeted reimport menu/cancel/wrong file, duplicates, EPUB covers/navigation, rename/collections/favorite/status/delete/undo, in-book search, RU/EN RSVP, search library, bookmark, jump history, reflow anchor, per-book settings, relaunch position\n");
+            result.putString("stream", "PASS: batch/invalid-file imports, targeted reimport menu/cancel/wrong file, duplicates, FB2/FB2.ZIP encodings/images/chapters/repair/XML rejection, EPUB covers/navigation, rename/collections/favorite/status/delete/undo, in-book search, RU/EN RSVP, search library, bookmark, jump history, reflow anchor, per-book settings, relaunch position\n");
             finish(Activity.RESULT_OK, result);
         } catch (Throwable error) {
             result.putString("stream", android.util.Log.getStackTraceString(error));
@@ -449,9 +450,9 @@ public class ReaderSmokeTest extends Instrumentation {
         awaitPages(activity);
         if ((int) field(activity, "anchor") <= before) throw new AssertionError("Volume did not turn page");
         before = (int) field(activity, "anchor");
-        tapReading(activity, .9f);
+        click(activity, activity.getString(R.string.next_page));
         awaitPages(activity);
-        if ((int) field(activity, "anchor") <= before) throw new AssertionError("Edge tap did not turn page");
+        if ((int) field(activity, "anchor") <= before) throw new AssertionError("Arrow did not turn page");
         int anchor = (int) field(activity, "anchor");
         tapReading(activity, .5f);
         if (!(boolean) field(activity, "fullscreen")) throw new AssertionError("Center tap did not hide controls");
@@ -818,6 +819,12 @@ public class ReaderSmokeTest extends Instrumentation {
             ReaderText.Picture[] pictures = first.getSpans(0, pages.visiblePages().get(0).end(), ReaderText.Picture.class);
             if (pictures.length == 0 || pictures[0].bitmap == null) throw new AssertionError("Visible illustration not decoded");
             capture("pages-illustration-dark");
+            int beforeTap = pages.start();
+            tapReading(opened, .9f); awaitPages(opened);
+            if ((int) field(opened, "anchor") != beforeTap || !(boolean) field(opened, "fullscreen"))
+                throw new AssertionError("Edge tap must toggle panels without turning a page");
+            tapReading(opened, .5f); awaitPages(opened);
+
             for (int theme : new int[]{2, 0}) {
                 runOnMainSync(() -> {
                     ((ReaderOptions) field(opened, "options")).put("theme", theme); invoke(opened, "changedOptions");
@@ -877,9 +884,13 @@ public class ReaderSmokeTest extends Instrumentation {
             if (field(normal, "pageReader") != null || (int) field(normal, "anchor") != saved)
                 throw new AssertionError("Switch to scroll lost position");
             runOnMainSync(() -> {
+                View footer = (View) field(normal, "footer");
+                if (find(footer, normal.getString(R.string.next_page)) != null || find(footer, normal.getString(R.string.previous_page)) != null)
+                    throw new AssertionError("Scroll must not show page arrows");
                 ScrollView scroll = (ScrollView) field(normal, "textScroll");
                 scroll.scrollBy(0, 200);
             }); waitForIdleSync();
+            capture("scroll-no-arrows-dark");
             int scrolled = (int) field(normal, "anchor");
             if (scrolled <= saved) throw new AssertionError("Continuous scrolling no longer works");
             runOnMainSync(() -> invoke(normal, "settings", new Class[]{boolean.class}, false));
@@ -921,17 +932,22 @@ public class ReaderSmokeTest extends Instrumentation {
             if (animation[0] != null) return animation[0];
             Thread.sleep(10);
         }
-        throw new AssertionError("Missing book turn animation");
+        throw new AssertionError("Missing page slide animation");
     }
     private void checkPageAnimation(MainActivity activity, String name) throws Exception {
         ReaderPages view = awaitPages(activity);
         int start = view.start(), end = view.end();
         for (int direction : new int[]{1, -1}) {
-            runOnMainSync(() -> view.turn(direction));
+            runOnMainSync(() -> {
+                String label = activity.getString(direction > 0 ? R.string.next_page : R.string.previous_page);
+                TextView arrow = find((View) field(activity, "footer"), label);
+                if (arrow == null || !arrow.performClick()) throw new AssertionError("Missing page arrow");
+            });
             android.animation.ValueAnimator animation = awaitPageAnimation(view);
             android.graphics.Bitmap[] frames = new android.graphics.Bitmap[2];
             runOnMainSync(() -> {
                 animation.pause();
+                if (animation.getDuration() != 180) throw new AssertionError("Expected short slide");
                 for (int i = 0; i < 2; i++) {
                     animation.setCurrentFraction(i == 0 ? 0f : .42f);
                     frames[i] = android.graphics.Bitmap.createBitmap(view.getWidth(), view.getHeight(), android.graphics.Bitmap.Config.ARGB_8888);
@@ -1116,6 +1132,55 @@ public class ReaderSmokeTest extends Instrumentation {
         }
         return false;
     }
+    private void fb2Check(Books store, byte[] cover) throws Exception {
+        String xml = "<?xml version='1.0' encoding='UTF-8'?><FictionBook xmlns='http://www.gribuser.ru/xml/fictionbook/2.0' xmlns:l='http://www.w3.org/1999/xlink'>"
+                + "<description><title-info><book-title>Маяк FB2</book-title><author><first-name>Мира</first-name><middle-name>А.</middle-name><last-name>Лунная</last-name></author>"
+                + "<author><nickname>MJReader</nickname></author><annotation><p>Not reading text</p></annotation><coverpage><image l:href='#cover'/></coverpage></title-info>"
+                + "<document-info><author><nickname>Not the author</nickname></author></document-info></description>"
+                + "<body><section><title><p>Первая глава</p></title><p>Мира <emphasis>увидела</emphasis> маяк &amp; звёзды.</p><image l:href='#cover' title='Маяк'/>"
+                + "<section><title><p>Вторая глава</p></title><poem><stanza><v>Строка один</v><v>Строка два</v></stanza></poem><p>Конец истории.</p></section></section></body>"
+                + "<body name='notes'><section><title><p>Примечания</p></title><p>Справка о маяке.</p></section></body><binary id='cover' content-type='image/png'>"
+                + android.util.Base64.encodeToString(cover, android.util.Base64.NO_WRAP) + "</binary></FictionBook>";
+        byte[] bytes = xml.getBytes(StandardCharsets.UTF_8);
+        Books.Book book = checkImport(store, "original.fb2", bytes, "Мира увидела маяк & звёзды.");
+        if (!book.title().equals("Маяк FB2") || !book.author().equals("Мира А. Лунная, MJReader")
+                || !java.util.Arrays.equals(book.cover(), cover) || book.chapters().size() != 3 || book.illustrations().size() != 1
+                || book.text().contains("Not reading") || !book.text().contains("Строка один\n\nСтрока два") || !book.text().contains("Справка о маяке."))
+            throw new AssertionError("FB2 content/metadata/cover/chapters");
+        for (Books.Chapter chapter : book.chapters())
+            if (!book.text().substring(chapter.offset()).startsWith(chapter.title())) throw new AssertionError("FB2 chapter offset");
+        Books.Illustration image = book.illustrations().get(0);
+        if (book.text().charAt(image.offset()) != '\uFFFC' || !image.alt().equals("Маяк")) throw new AssertionError("FB2 image offset");
+        Books.Book persisted = store.list().stream().filter(b -> b.id().equals(book.id())).findFirst().orElseThrow();
+        if (!persisted.text().equals(book.text()) || persisted.illustrations().size() != 1) throw new AssertionError("FB2 persisted assets");
+        try { checkImport(store, "duplicate.fb2", bytes, "Мира"); throw new AssertionError("FB2 duplicate accepted"); }
+        catch (Books.DuplicateBook expected) { }
+        ByteArrayOutputStream archive = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(archive)) { entry(zip, "book.fb2", xml); }
+        try { checkImport(store, "duplicate.fb2.zip", archive.toByteArray(), "Мира"); throw new AssertionError("Zipped FB2 duplicate accepted"); }
+        catch (Books.DuplicateBook expected) { }
+        File stored = new File(getTargetContext().getFilesDir(), "books/" + book.id() + ".json");
+        JSONObject legacy = new JSONObject(new String(java.nio.file.Files.readAllBytes(stored.toPath()), StandardCharsets.UTF_8));
+        legacy.remove("cover"); legacy.remove("images"); legacy.remove("illustrations");
+        java.nio.file.Files.write(stored.toPath(), legacy.toString().getBytes(StandardCharsets.UTF_8));
+        var prefs = getTargetContext().getSharedPreferences("reader", 0);
+        prefs.edit().putInt("anchor." + book.id(), 12).putString("bookmarks." + book.id(), "[{\"offset\":12}]").commit();
+        Books.Book repaired = checkImport(store, "repair.fb2.zip", archive.toByteArray(), "Мира");
+        if (!repaired.id().equals(book.id()) || !repaired.text().equals(book.text()) || repaired.cover() == null || repaired.illustrations().size() != 1
+                || prefs.getInt("anchor." + book.id(), 0) != 12 || !prefs.getString("bookmarks." + book.id(), "").contains("12")) throw new AssertionError("FB2 repair changed position");
+        for (String encoding : new String[]{"windows-1251", "UTF-16"}) {
+            String encoded = xml.replace("UTF-8", encoding).replace("Конец истории.", "Конец истории. " + encoding);
+            checkImport(store, "encoding.fb2", encoded.getBytes(Charset.forName(encoding)), "Мира увидела маяк & звёзды.");
+        }
+        int count = store.list().size();
+        for (String invalid : new String[]{"<not-a-book/>", "<FictionBook><body/>",
+                "<!DOCTYPE FictionBook [<!ENTITY bad SYSTEM 'file:///private'>]><FictionBook><body><p>&bad;</p></body></FictionBook>",
+                "<FictionBook><body>" + "<section>".repeat(130) + "too deep" + "</section>".repeat(130) + "</body></FictionBook>"}) {
+            try { checkImport(store, "invalid.fb2", invalid.getBytes(StandardCharsets.UTF_8), ""); throw new AssertionError("Invalid FB2 accepted"); }
+            catch (IOException | org.xml.sax.SAXException | org.xmlpull.v1.XmlPullParserException expected) { }
+        }
+        if (store.list().size() != count) throw new AssertionError("Invalid FB2 altered library");
+    }
     private Books.Book checkImport(Books store, String name, byte[] bytes, String expected) throws Exception {
         ContentResolver resolver = getTargetContext().getContentResolver();
         Uri uri = createDocument(name, bytes);
@@ -1129,7 +1194,7 @@ public class ReaderSmokeTest extends Instrumentation {
         ContentResolver resolver = getTargetContext().getContentResolver();
         ContentValues values = new ContentValues();
         values.put(MediaStore.Downloads.DISPLAY_NAME, java.util.UUID.randomUUID() + "-" + name);
-        values.put(MediaStore.Downloads.MIME_TYPE, name.endsWith(".epub") ? "application/epub+zip" : "text/plain");
+        values.put(MediaStore.Downloads.MIME_TYPE, name.endsWith(".epub") ? "application/epub+zip" : name.endsWith(".zip") ? "application/zip" : name.endsWith(".fb2") ? "application/x-fictionbook+xml" : "text/plain");
         Uri uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
         if (uri == null) throw new AssertionError("Download URI");
         try (OutputStream output = resolver.openOutputStream(uri)) { output.write(bytes); }

@@ -121,6 +121,10 @@ final class Flibusta {
                     // Buying/borrowing links may lead to HTML forms, not a book file.
                     if (!(rel.equals("http://opds-spec.org/acquisition") || rel.equals("http://opds-spec.org/acquisition/open-access"))) continue;
                     if (type.equals("application/epub+zip")) { acquisition = resolve(base, link.getAttribute("href")); format = "epub"; }
+                    else if (Set.of("application/fb2+zip", "application/fb2+xml", "application/x-fictionbook+xml", "application/x-fictionbook")
+                            .contains(type.split(";", 2)[0].trim()) && !format.equals("epub")) {
+                        acquisition = resolve(base, link.getAttribute("href")); format = "fb2";
+                    }
                     else if (type.startsWith("text/plain") && format.isEmpty()) { acquisition = resolve(base, link.getAttribute("href")); format = "txt"; }
                 } else if (type.startsWith("application/atom+xml") && navigation.isEmpty() && !rel.equals("alternate") && !rel.equals("related"))
                     navigation = resolve(base, link.getAttribute("href"));

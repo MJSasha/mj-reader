@@ -25,7 +25,6 @@ final class ReaderPages extends View {
     private int anchor, end, generation;
     private boolean loading;
     private PageTurn pageTurn;
-    private float downX;
     private final Paint rule = new Paint();
     record Page(int start, int end, StaticLayout layout, int sourceStart, int top) {}
 
@@ -43,21 +42,13 @@ final class ReaderPages extends View {
         setOnClickListener(v -> center.run());
         setOnLongClickListener(v -> { paragraph.accept(this.anchor); return true; });
         gestures = new GestureDetector(context, new GestureDetector.SimpleOnGestureListener() {
-            @Override public boolean onDown(MotionEvent event) { downX = event.getX(); return true; }
+            @Override public boolean onDown(MotionEvent event) { return true; }
             @Override public boolean onSingleTapUp(MotionEvent event) {
-                if (event.getX() < getWidth() * .25f) turn(-1);
-                else if (event.getX() > getWidth() * .75f) turn(1);
-                else performClick();
+                performClick();
                 return true;
             }
             @Override public void onLongPress(MotionEvent event) {
                 paragraph.accept(offsetAt(event.getX(), event.getY()));
-            }
-            @Override public boolean onFling(MotionEvent first, MotionEvent last, float vx, float vy) {
-                if (Math.abs(last.getX() - downX) > dp(48) && Math.abs(vx) > Math.abs(vy)) {
-                    turn(last.getX() < downX ? 1 : -1); return true;
-                }
-                return false;
             }
         });
     }
@@ -191,33 +182,16 @@ final class ReaderPages extends View {
         if (finished != null) finished.animator.cancel();
         invalidate();
     }
-    /** Two bounded page textures, bent in strips around the book spine; no full-book bitmap. */
+    /** Slide the existing bounded layouts; no page textures or simulated paper. */
     private final class PageTurn {
-        private static final int COLUMNS = 32, ROWS = 6;
         final android.animation.ValueAnimator animator = android.animation.ValueAnimator.ofFloat(0, 1);
         final List<Page> previous;
         final int direction;
-        final boolean spread = columns() == 2;
-        final float sheetWidth = spread ? getWidth() / 2f : getWidth();
-        final Bitmap front, back;
-        final float[] mesh = new float[(COLUMNS + 1) * (ROWS + 1) * 2];
-        final int[] shades = new int[(COLUMNS + 1) * (ROWS + 1)];
-        final Paint texture = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-        final Paint shadow = new Paint(Paint.ANTI_ALIAS_FLAG);
-        final Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG);
-        final Path outline = new Path();
-        final Matrix shadowMatrix = new Matrix();
-        final LinearGradient shadowGradient = new LinearGradient(0, 0, 1, 0,
-                new int[]{0x00000000, 0x48000000, 0x00000000}, null, Shader.TileMode.CLAMP);
         float progress;
         PageTurn(List<Page> previous, int direction) {
             this.previous = previous; this.direction = direction;
-            front = snapshot(!spread && direction < 0 ? pages : previous, spread && direction > 0 ? sheetWidth : 0);
-            back = spread ? snapshot(pages, direction > 0 ? 0 : sheetWidth) : null;
-            shadow.setShader(shadowGradient);
-            edge.setStyle(Paint.Style.STROKE); edge.setStrokeWidth(dp(1));
-            animator.setDuration(spread ? 520 : 420);
-            animator.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
+            animator.setDuration(180);
+            animator.setInterpolator(new android.view.animation.DecelerateInterpolator());
             animator.addUpdateListener(value -> { progress = (float) value.getAnimatedValue(); invalidate(); });
             animator.addListener(new android.animation.AnimatorListenerAdapter() {
                 @Override public void onAnimationEnd(android.animation.Animator animation) {
@@ -225,58 +199,14 @@ final class ReaderPages extends View {
                 }
             });
         }
-        private Bitmap snapshot(List<Page> content, float left) {
-            // Keep each texture below 0.75 megapixels even on high-density tablets.
-            float scale = Math.min(1f, (float) Math.sqrt(750000f / (sheetWidth * getHeight())));
-            Bitmap image = Bitmap.createBitmap(Math.max(1, Math.round(sheetWidth * scale)),
-                    Math.max(1, Math.round(getHeight() * scale)), Bitmap.Config.ARGB_8888);
-            Canvas canvas = new Canvas(image);
-            canvas.drawColor(options.background()); canvas.scale(scale, scale); canvas.translate(-left, 0);
-            drawPages(canvas, content);
-            return image;
-        }
         void draw(Canvas canvas) {
-            if (spread) {
-                drawPages(canvas, previous);
-                int saved = canvas.save();
-                if (direction > 0) canvas.clipRect(sheetWidth, 0, getWidth(), getHeight());
-                else canvas.clipRect(0, 0, sheetWidth, getHeight());
-                canvas.drawColor(options.background()); drawPages(canvas, pages); canvas.restoreToCount(saved);
-            } else drawPages(canvas, direction > 0 ? pages : previous);
-            double angle = Math.PI * (spread ? progress : (direction > 0 ? progress : 1 - progress) / 2);
-            float sine = (float) Math.sin(angle), cosine = (float) Math.cos(angle);
-            boolean reverse = spread && progress > .5f;
-            float hinge = spread ? sheetWidth : 0, side = spread ? direction : 1;
-            float camera = Math.max(sheetWidth, getHeight()) * 3;
-            for (int row = 0; row <= ROWS; row++) for (int column = 0; column <= COLUMNS; column++) {
-                float source = column / (float) COLUMNS;
-                float u = spread && (direction < 0 ^ reverse) ? 1 - source : source;
-                float bend = (float) Math.sin(u * Math.PI) * sheetWidth * .16f * sine * Math.abs(cosine);
-                float depth = u * sheetWidth * sine - bend * cosine;
-                float perspective = camera / (camera + depth);
-                int vertex = row * (COLUMNS + 1) + column;
-                mesh[vertex * 2] = hinge + side * (u * sheetWidth * cosine + bend * sine) * perspective;
-                mesh[vertex * 2 + 1] = getHeight() / 2f + (row / (float) ROWS - .5f) * getHeight() * perspective;
-                int tone = Math.round(255 * (1 - .2f * sine * (float) Math.sin(u * Math.PI)));
-                shades[vertex] = Color.rgb(tone, tone, tone);
-            }
-            float farEdge = hinge + side * sheetWidth * cosine * camera / (camera + sheetWidth * sine);
-            float shadeWidth = dp(36) * sine;
-            shadowMatrix.setScale(Math.max(1, shadeWidth * 2), getHeight());
-            shadowMatrix.postTranslate(farEdge - shadeWidth, 0); shadowGradient.setLocalMatrix(shadowMatrix);
-            shadow.setAlpha(Math.round(150 * sine));
-            canvas.drawRect(farEdge - shadeWidth, 0, farEdge + shadeWidth, getHeight(), shadow);
-            canvas.drawBitmapMesh(reverse ? back : front, COLUMNS, ROWS, mesh, 0, shades, 0, texture);
-            outline.rewind(); outline.moveTo(mesh[0], mesh[1]);
-            for (int column = 1; column <= COLUMNS; column++) outline.lineTo(mesh[column * 2], mesh[column * 2 + 1]);
-            for (int row = 1; row <= ROWS; row++) {
-                int vertex = row * (COLUMNS + 1) + COLUMNS; outline.lineTo(mesh[vertex * 2], mesh[vertex * 2 + 1]);
-            }
-            for (int column = COLUMNS - 1; column >= 0; column--) {
-                int vertex = ROWS * (COLUMNS + 1) + column; outline.lineTo(mesh[vertex * 2], mesh[vertex * 2 + 1]);
-            }
-            outline.close(); edge.setColor(options.muted()); edge.setAlpha(Math.round(90 * sine));
-            canvas.drawPath(outline, edge);
+            int saved = canvas.save();
+            canvas.clipRect(0, 0, getWidth(), getHeight());
+            canvas.translate(-direction * progress * getWidth(), 0);
+            drawPages(canvas, previous);
+            canvas.translate(direction * getWidth(), 0);
+            drawPages(canvas, pages);
+            canvas.restoreToCount(saved);
         }
     }
     private int offsetAt(float x, float y) {

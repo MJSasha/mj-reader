@@ -35,7 +35,7 @@ final class BookDownloads {
         }
     }
     static String create(Context context, Flibusta.Entry entry) throws Exception {
-        if (!entry.book() || !(entry.format().equals("epub") || entry.format().equals("txt"))) throw new IOException("Нет EPUB или TXT / No EPUB or TXT available");
+        if (!entry.book() || !(entry.format().equals("epub") || entry.format().equals("txt") || entry.format().equals("fb2"))) throw new IOException("Нет EPUB, FB2 или TXT / No EPUB, FB2 or TXT available");
         Flibusta.https(entry.url());
         StringBuilder hash = new StringBuilder();
         for (byte b : MessageDigest.getInstance("SHA-256").digest(entry.url().getBytes(StandardCharsets.UTF_8))) hash.append(String.format(Locale.ROOT, "%02x", b & 255));

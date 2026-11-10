@@ -54,6 +54,15 @@ final class CatalogCheck {
             require(transientRequests.get() == 3 && !retried.feed().entries().isEmpty(), "Bounded HTTP 503 retries");
             var first = failover.feed().entries().get(0);
             require(first.book() && first.format().equals("epub") && first.author().equals("MJReader"), "OPDS EPUB preference and author");
+            Flibusta.Entry fb2Entry = null;
+            for (String mime : new String[]{"application/fb2+zip", "application/x-fictionbook+xml", "application/fb2+xml", "application/x-fictionbook"}) {
+                String feed = "<feed xmlns='http://www.w3.org/2005/Atom'><entry><title>FB2 from catalog</title>"
+                        + "<link rel='http://opds-spec.org/acquisition' type='text/plain' href='/unused.txt'/>"
+                        + "<link rel='http://opds-spec.org/acquisition' type='" + mime + "' href='/book.fb2'/></entry></feed>";
+                fb2Entry = Flibusta.parse(feed.getBytes(StandardCharsets.UTF_8), origin).entries().get(0);
+                require(fb2Entry.format().equals("fb2") && fb2Entry.url().equals(origin + "/book.fb2"), "FB2 acquisition before TXT");
+            }
+
             require(failover.feed().next().contains("page=2"), "Next-page URL");
             require(first.details().downloads() == 1234 && first.details().language().equals("ru") && first.details().size().equals("564 Kb"), "Catalog download metadata");
             require(first.details().publisher().equals("MJReader Originals") && first.details().issued().equals("2026")
@@ -124,6 +133,11 @@ final class CatalogCheck {
                     String bookId = complete.getString("book"); imported.add(bookId);
                     Books.Book book = new Books(context).list().stream().filter(b -> b.id().equals(bookId)).findFirst().orElseThrow();
                     require(book.title().equals("Орбита из каталога") && book.chapters().size() == 2 && book.cover() != null, "EPUB title, cover and chapters imported");
+                    String fb2Id = BookDownloads.create(context, fb2Entry); jobs.add(fb2Id);
+                    test.runOnMainSync(() -> BookDownloadService.command(context, "start", fb2Id));
+                    JSONObject fb2Complete = waitState(fb2Id, "complete", 20000); imported.add(fb2Complete.getString("book"));
+                    require(new Books(context).list().stream().anyMatch(b -> b.id().equals(fb2Complete.optString("book"))
+                            && b.title().equals("Маяк из FB2") && b.text().contains("Мира нашла сигнал.")), "HTTPS zipped FB2 download/import");
                     Thread.sleep(1300); capture("catalog-complete");
                     test.runOnMainSync(screen::finish);
                     CatalogActivity taskScreen = (CatalogActivity) test.startActivitySync(new Intent(context, CatalogActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("downloads", true));
@@ -161,8 +175,8 @@ final class CatalogCheck {
             BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII)); String line = reader.readLine();
             if (line == null) return; String path = line.split(" ")[1]; while ((line = reader.readLine()) != null && !line.isEmpty()) { }
             int status = path.startsWith("/bad/") || path.startsWith("/flaky/") && transientRequests.getAndIncrement() < 2 ? 503 : 200;
-            byte[] data = path.equals("/book.epub") ? epub : path.equals("/slow.txt") ? slow : feed(origin, path.contains("page=2")).getBytes(StandardCharsets.UTF_8);
-            String mime = path.endsWith("epub") ? "application/epub+zip" : path.endsWith("txt") ? "text/plain" : "application/atom+xml";
+            byte[] data = path.equals("/book.fb2") ? fb2() : path.equals("/book.epub") ? epub : path.equals("/slow.txt") ? slow : feed(origin, path.contains("page=2")).getBytes(StandardCharsets.UTF_8);
+            String mime = path.endsWith("fb2") ? "application/fb2+zip" : path.endsWith("epub") ? "application/epub+zip" : path.endsWith("txt") ? "text/plain" : "application/atom+xml";
             OutputStream output = socket.getOutputStream(); output.write(("HTTP/1.1 " + status + " Test\r\nContent-Type: " + mime + "\r\nContent-Length: " + data.length + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
             for (int pos = 0; pos < data.length; pos += 4096) { output.write(data, pos, Math.min(4096, data.length - pos)); output.flush(); if (path.equals("/slow.txt")) Thread.sleep(25); }
         } catch (Exception ignored) { }
@@ -171,6 +185,17 @@ final class CatalogCheck {
         String result = "<feed xmlns='http://www.w3.org/2005/Atom' xmlns:dc='http://purl.org/dc/terms/'><title>Книги для нового путешествия</title><link rel='next' href='?page=2'/><entry><title>Орбита из каталога</title><author><name>MJReader</name></author><dc:language>ru</dc:language><dc:publisher>MJReader Originals</dc:publisher><dc:issued>2026</dc:issued><dc:identifier>urn:mjreader:orbit</dc:identifier><category term='sf' label='Научная фантастика'/><content type='html'>История о маяке на орбите. Original bilingual test story.&lt;br/&gt;Язык: ru&lt;br/&gt;Размер: 564 Kb&lt;br/&gt;Скачиваний: 1 234&lt;br/&gt;</content><link rel='http://opds-spec.org/acquisition/open-access' type='application/fb2+zip' href='/not-used.fb2'/><link rel='http://opds-spec.org/acquisition/open-access' type='application/epub+zip' href='" + origin + "/book.epub'/></entry><entry><title>Долгая история</title><author><name>MJReader</name></author><content>Скачиваний: 2500</content><link rel='http://opds-spec.org/acquisition/open-access' type='text/plain' href='" + origin + "/slow.txt'/></entry></feed>";
         if (second) result = result.replace("<link rel='next' href='?page=2'/>", "").replace("</feed>", "<entry><title>Новая история</title><author><name>MJReader</name></author><content>Скачиваний: 5000</content><link rel='http://opds-spec.org/acquisition/open-access' type='application/epub+zip' href='" + origin + "/book.epub?edition=2'/></entry></feed>");
         return result;
+    }
+    private byte[] fb2() throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
+            zip.putNextEntry(new ZipEntry("story.fb2"));
+            zip.write(("<?xml version='1.0' encoding='UTF-8'?><FictionBook xmlns='http://www.gribuser.ru/xml/fictionbook/2.0'>"
+                    + "<description><title-info><book-title>Маяк из FB2</book-title></title-info></description>"
+                    + "<body><section><title><p>Сигнал</p></title><p>Мира нашла сигнал.</p></section></body></FictionBook>").getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+        }
+        return bytes.toByteArray();
     }
     private byte[] epub() throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();

@@ -618,7 +618,9 @@ public class MainActivity extends Activity {
         if (importing) return;
         reimportId = bookId;
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE);
-        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/epub+zip", "text/plain", "application/octet-stream"});
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/epub+zip", "text/plain", "application/octet-stream",
+                "application/x-fictionbook+xml", "application/x-fictionbook", "application/fb2+xml",
+                "application/fb2+zip", "application/zip", "application/x-zip-compressed", "application/xml", "text/xml"});
         intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, bookId == null);
         startActivityForResult(intent, bookId == null ? 1 : 2);
     }
@@ -681,7 +683,7 @@ public class MainActivity extends Activity {
                             : e instanceof Books.DuplicateBook
                             ? (repairId != null ? tr("книга уже обновлена, изменений нет", "book is already up to date")
                                     : tr("уже в библиотеке (проверьте также «Удалённые»)", "already in library (also check Deleted)"))
-                            : tr("не удалось прочитать. Выберите TXT или EPUB без DRM. ", "could not read. Choose TXT or DRM-free EPUB. ") + e.getMessage()).append("\n");
+                            : tr("не удалось прочитать. Выберите TXT, FB2 или EPUB без DRM. ", "could not read. Choose TXT, FB2 or DRM-free EPUB. ") + e.getMessage()).append("\n");
                 }
             }
             List<Books.Book> refreshed;
@@ -794,11 +796,7 @@ public class MainActivity extends Activity {
     }
     @android.annotation.SuppressLint({"NewApi", "ClickableViewAccessibility"})
     private void scrollScreen() {
-        textScroll = new ScrollView(this) {
-            @Override public boolean onInterceptTouchEvent(android.view.MotionEvent event) {
-                return !options.flag("pages", false) && super.onInterceptTouchEvent(event);
-            }
-        };
+        textScroll = new ScrollView(this);
         body = label("", options.number("size", prefs.getInt("typeSize", 21)), options.ink());
         String[] fonts = {"serif", "sans-serif", "monospace"};
         body.setTypeface(Typeface.create(fonts[options.number("font", 0)], Typeface.NORMAL));
@@ -820,21 +818,14 @@ public class MainActivity extends Activity {
         GestureDetector gestures = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onDown(android.view.MotionEvent event) { return true; }
             @Override public boolean onSingleTapUp(android.view.MotionEvent event) {
-                if (options.flag("pages", false) && event.getX() < body.getWidth() * .25f) turnPage(-1);
-                else if (options.flag("pages", false) && event.getX() > body.getWidth() * .75f) turnPage(1);
-                else body.performClick();
+                body.performClick();
                 return true;
             }
             @Override public void onLongPress(android.view.MotionEvent event) {
                 paragraphActions(textStart + body.getOffsetForPosition(event.getX(), event.getY()));
             }
-            @Override public boolean onFling(android.view.MotionEvent first, android.view.MotionEvent last, float x, float y) {
-                if (options.flag("pages", false) && first != null && Math.abs(last.getX() - first.getX()) > dp(60)
-                        && Math.abs(x) > Math.abs(y)) { turnPage(last.getX() < first.getX() ? 1 : -1); return true; }
-                return false;
-            }
         });
-        // GestureDetector calls performClick for center taps; arrows also provide accessible paging.
+        // Taps toggle controls; vertical gestures remain native scrolling.
         body.setOnTouchListener((view, event) -> gestures.onTouchEvent(event));
         body.setOnLongClickListener(view -> { paragraphActions(anchor); return true; });
         int version = renderVersion;
@@ -867,10 +858,12 @@ public class MainActivity extends Activity {
         footer.setPadding(dp(8), dp(8), dp(8), dp(8));
         footer.setBackground(shape(options.surface(), 20));
         LinearLayout navigation = row();
-        Button previous = button("←", false, () -> turnPage(-1));
-        previous.setContentDescription(getString(R.string.previous_page));
-        navigation.addView(previous, new LinearLayout.LayoutParams(dp(48), -2));
-        space(navigation);
+        if (options.flag("pages", false)) {
+            Button previous = button("←", false, () -> turnPage(-1));
+            previous.setContentDescription(getString(R.string.previous_page));
+            navigation.addView(previous, new LinearLayout.LayoutParams(dp(48), -2));
+            space(navigation);
+        }
         counter = label("", 13, options.muted());
         counter.setGravity(Gravity.CENTER);
         counter.setMinHeight(dp(48));
@@ -879,10 +872,12 @@ public class MainActivity extends Activity {
         counter.setFocusable(true);
         counter.setBackground(feedback(shape(options.surface(), 14)));
         navigation.addView(counter, new LinearLayout.LayoutParams(0, -2, 1));
-        space(navigation);
-        Button next = button("→", false, () -> turnPage(1));
-        next.setContentDescription(getString(R.string.next_page));
-        navigation.addView(next, new LinearLayout.LayoutParams(dp(48), -2));
+        if (options.flag("pages", false)) {
+            space(navigation);
+            Button next = button("→", false, () -> turnPage(1));
+            next.setContentDescription(getString(R.string.next_page));
+            navigation.addView(next, new LinearLayout.LayoutParams(dp(48), -2));
+        }
         footer.addView(navigation);
         if (getResources().getConfiguration().screenHeightDp >= 400) {
             LinearLayout tools = row();
@@ -1481,13 +1476,13 @@ public class MainActivity extends Activity {
                     value -> { options.put("paragraphGap", value); changedOptions(); });
             choose(content, tr("Выравнивание", "Alignment"), new String[]{tr("По левому краю", "Start"), tr("По ширине", "Justified"), tr("По центру", "Centered")},
                     options.number("alignment", 0), value -> { options.put("alignment", value); changedOptions(); });
-            choose(content, tr("Режим чтения", "Reading mode"), new String[]{tr("Прокрутка", "Scroll"), tr("Страницы", "Pages")},
+            choose(content, tr("Режим чтения", "Reading mode"), new String[]{tr("Прокрутка", "Scroll"), tr("Листание", "Pages")},
                     options.flag("pages", false) ? 1 : 0,
                     value -> { options.put("pages", value == 1); changedOptions(); });
             toggle(content, tr("Листать кнопками громкости", "Turn pages with volume keys"), options.flag("volumePages", false),
                     value -> { options.put("volumePages", value); persistOptions(); });
-            content.addView(label(tr("В режиме перелистывания: края — страницы, центр — панели. Удержание текста — цитата.",
-                    "Page mode: tap edges to turn, center for controls. Hold text to save a quote."), 14, options.muted()));
+            content.addView(label(tr("В режиме листания: стрелки — страницы. Нажатие на текст — панели, удержание — цитата.",
+                    "Page mode: use arrows to turn pages. Tap text for controls; hold to save a quote."), 14, options.muted()));
             content = settingsGroup(page, tr("Экран", "Display"));
             range(content, tr("Яркость, 0 = системная", "Brightness, 0 = system"), 0, 100, options.number("brightness", 0),
                     value -> { options.put("brightness", value); persistOptions(); applyWindow(); });

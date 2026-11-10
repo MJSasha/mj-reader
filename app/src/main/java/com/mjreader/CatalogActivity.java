@@ -167,7 +167,7 @@ public class CatalogActivity extends Activity {
         content.addView(tools); gap(content, 14);
         if (!message.isEmpty()) { resultStatus = text(message, 14, theme.muted()); content.addView(resultStatus); gap(content, 10); }
         if (entries.isEmpty() && next.isEmpty()) empty(currentUrl.isEmpty() ? tr("Выбирайте, что читать дальше", "Choose your next read") : tr("Ничего не найдено", "No results"),
-                currentUrl.isEmpty() ? tr("Ищите по названию или автору, открывайте разделы каталога. EPUB скачивается прямо в MJReader.", "Search by title or author, or browse the catalog. EPUB books download directly into MJReader.") : tr("Попробуйте другое название, фамилию автора или адрес каталога.", "Try another title, author, or catalog address."));
+                currentUrl.isEmpty() ? tr("Ищите по названию или автору, открывайте разделы каталога. EPUB, FB2 и TXT скачиваются прямо в MJReader.", "Search by title or author, or browse the catalog. EPUB, FB2 and TXT books download directly into MJReader.") : tr("Попробуйте другое название, фамилию автора или адрес каталога.", "Try another title, author, or catalog address."));
         else {
             ListView list = list(); adapter = new BaseAdapter() {
                 public int getCount() { return (entries.size() + catalogColumns() - 1) / catalogColumns(); }
@@ -337,7 +337,7 @@ public class CatalogActivity extends Activity {
         if (entry.details().downloads() >= 0) { page.addView(text(downloadCount(entry), 14, theme.accent())); gap(page, 16); }
         if (!entry.description().isEmpty()) detail(page, tr("Аннотация", "Description"), entry.description());
         else { page.addView(text(tr("Каталог не предоставил аннотацию.", "No description supplied by the catalog."), 14, theme.muted())); gap(page, 12); }
-        if (entry.format().isEmpty()) page.addView(text(tr("У этой записи нет прямой ссылки на EPUB или TXT.", "This entry has no direct EPUB or TXT link."), 14, theme.muted()));
+        if (entry.format().isEmpty()) page.addView(text(tr("У этой записи нет прямой ссылки на EPUB, FB2 или TXT.", "This entry has no direct EPUB, FB2 or TXT link."), 14, theme.muted()));
         ReaderDialogs dialog = new ReaderDialogs(this, theme).setTitle(entry.title()).setView(page)
                 .setNegativeButton(tr("Закрыть", "Close"), null);
         if (!entry.format().isEmpty()) dialog.setPositiveButton(tr("Скачать", "Download"), (d, w) -> download(entry));

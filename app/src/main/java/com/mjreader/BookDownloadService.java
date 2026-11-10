@@ -95,7 +95,7 @@ public class BookDownloadService extends Service {
                 transfer.check();
                 if (done == 0 || (total >= 0 && done != total)) throw new IOException("Книга скачалась не полностью / Incomplete download");
                 String format = job.getString("format");
-                if (!format.equals("epub") && !format.equals("txt")) throw new IOException("Unsupported format");
+                if (!format.equals("epub") && !format.equals("txt") && !format.equals("fb2")) throw new IOException("Unsupported format");
                 String name = job.optString("title", "Book").replaceAll("[\\p{Cntrl}/\\\\]", " ").trim();
                 if (name.isEmpty()) name = "Book";
                 int end = Math.min(60, name.length());
