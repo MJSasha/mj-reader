@@ -16,6 +16,7 @@ Compose, a database library or a torrent runtime. It is a single `:app` Gradle m
 | `ReaderText` | Chapter/paragraph/image spans and an approximately 18k-character window | Window-relative UI offsets map back to full text |
 | `ReaderPages` | One/two native page layouts, arrow/edge-tap controls and accessible page turns | Layout/image decoding on the worker; exact full-text page boundaries |
 | `ReaderOptions` | JSON settings, semantic colors, interaction states, resize observation | Shared by main reader and catalog |
+| `ReaderSpotlight` | Blurred viewport and sharp source sentence behind footnotes | In-memory snapshot capped at 4M pixels; API 31 blur, filtered fallback on older Android |
 | `ReaderDialogs` / `ReaderIcon` | Branded native menus and vector-drawn symbols | Scrolling actions, keyboard and accessibility |
 | `CatalogActivity` | Query, tabs, results, pagination, download status | No duplicate page loads; stale request generations ignored |
 | `Flibusta` | HTTPS, OPDS, known/custom mirrors, bounded retries | Atom/XML validation; no HTML scraping or browser execution |
@@ -94,7 +95,7 @@ Prefer the platform/standard library or existing helpers. Add a dependency only 
 concrete requirement. Keep parser, presentation and transfer responsibilities in their
 current owners; a UI cleanup should not rewrite storage or change the signing identity.
 
-Android VIEW/SEND content URIs use the existing background import queue; duplicates open the stored book ID. Pending URIs survive Activity recreation. Footnote taps take precedence over edge navigation, open the existing themed dialog, and never change the reader anchor. Screen readers expose footnotes as custom actions.
+Android VIEW/SEND content URIs use the existing background import queue; duplicates open the stored book ID. Pending URIs survive Activity recreation. Footnote targets expand to at least 48 dp and choose the nearest marker when targets overlap. They take precedence over edge navigation and never change the reader anchor. `ReadingText.sentence` searches at most 2000 characters on either side of a reference. `ReaderSpotlight` blurs the viewport while keeping the visible sentence sharp; `ReaderDialogs` positions the scrollable note beside it, with a pinned close button. The popup is dismissed on backgrounding or rebuilding the reader to discard stale geometry. Screen readers expose footnotes as custom actions.
 
 ## App updates
 

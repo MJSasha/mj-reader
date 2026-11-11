@@ -220,8 +220,21 @@ final class ReaderPages extends View {
         int index = Math.max(0, (int) x / stride);
         if (index >= pages.size()) return -1;
         Page page = pages.get(index);
-        int offset = ReaderText.hit(page.layout(), x - index * stride - margin(), y - dp(12) + page.top());
-        return offset < 0 || page.sourceStart() + offset >= page.end() ? -1 : page.sourceStart() + offset;
+        return ReaderText.noteHit(book, page.layout(), page.sourceStart(), page.start(), page.end(),
+                x - index * stride - margin(), y - dp(12) + page.top(), getResources().getDisplayMetrics().density);
+    }
+    Path selection(int from, int to) {
+        Path result = new Path();
+        int stride = pageWidth() + margin() * 2 + dp(32);
+        for (int i = 0; i < pages.size(); i++) {
+            Page page = pages.get(i); int start = Math.max(from, page.start()), end = Math.min(to, page.end());
+            if (end <= start) continue;
+            Path part = new Path(); page.layout().getSelectionPath(start - page.sourceStart(), end - page.sourceStart(), part);
+            part.offset(margin() + i * stride, dp(12) - page.top());
+            Path clip = new Path(); clip.addRect(margin() + i * stride, dp(12), margin() + i * stride + pageWidth(), getHeight() - dp(12), Path.Direction.CW);
+            part.op(clip, Path.Op.INTERSECT); result.addPath(part);
+        }
+        return result;
     }
     private int offsetAt(float x, float y) {
         if (pages.isEmpty()) return anchor;

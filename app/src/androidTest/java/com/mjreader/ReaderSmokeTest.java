@@ -54,6 +54,7 @@ public class ReaderSmokeTest extends Instrumentation {
                 finish(Activity.RESULT_OK, result); return;
             }
             if (visualOnly) {
+                noteSpotlightCheck();
                 visualCheck();
                 result.putString("stream", "PASS: themed library grid, settings, custom menus and scrollable actions\n");
                 finish(Activity.RESULT_OK, result);
@@ -295,6 +296,8 @@ public class ReaderSmokeTest extends Instrumentation {
                 runOnMainSync(() -> ((ScrollView) field(reopened, "settingsScroll")).scrollTo(0, 320));
                 Thread.sleep(200);
                 capture("settings-colors-" + theme);
+                runOnMainSync(() -> ((ScrollView) field(reopened, "settingsScroll")).fullScroll(View.FOCUS_DOWN));
+                waitForIdleSync(); Thread.sleep(200); capture("settings-updates-" + theme);
                 runOnMainSync(reopened::onBackPressed);
                 runOnMainSync(() -> ((EditText) field(reopened, "librarySearch")).setText("Emulator EPUB"));
                 runOnMainSync(() -> ((ListView) field(reopened, "libraryList")).setSelection(1));
@@ -893,6 +896,13 @@ public class ReaderSmokeTest extends Instrumentation {
                     TextView tab = find(screen.getWindow().getDecorView(), scenario == 1 ? "Appearance" : "Оформление");
                     if (tab == null || tab.getLineCount() != 1) throw new AssertionError("Narrow settings tab wraps");
                     capture("narrow-settings-" + scenario);
+                    runOnMainSync(() -> ((ScrollView) field(screen, "settingsScroll")).fullScroll(View.FOCUS_DOWN));
+                    waitForIdleSync(); Thread.sleep(200);
+                    View updates = screen.getWindow().getDecorView().findViewWithTag("updates-entry");
+                    android.graphics.Rect visible = new android.graphics.Rect();
+                    if (updates == null || !updates.isClickable() || !updates.getGlobalVisibleRect(visible) || visible.height() != updates.getHeight())
+                        throw new AssertionError("Updates entry clipped on narrow screen");
+                    assertTouchTargets(updates); capture("narrow-updates-" + scenario);
                 } finally { runOnMainSync(screen::finish); }
                 CatalogActivity catalog = (CatalogActivity) startActivitySync(new Intent(context, CatalogActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                 try {
@@ -1435,8 +1445,88 @@ public class ReaderSmokeTest extends Instrumentation {
                 throw new AssertionError("Footnote range moved");
         }
     }
+    private void noteSpotlightCheck() throws Exception {
+        Context context = getTargetContext(); var prefs = context.getSharedPreferences("reader", 0);
+        String saved = prefs.getString("options", "{}");
+        try {
+            for (int scenario = 0; scenario < 4; scenario++) {
+                shell("wm size " + (scenario == 1 ? "800x900" : scenario == 3 ? "740x360" : "360x840"));
+                shell("settings put system font_scale " + (scenario >= 2 ? "2.0" : "1.0"));
+                shell("settings put global animator_duration_scale " + (scenario == 3 ? "0" : "1"));
+                prefs.edit().putString("options", "{\"size\":19,\"theme\":" + (scenario % 2 * 2) + ",\"pages\":" + (scenario < 2) + "}").commit();
+                String paragraph = "The evening was calm. Mira followed the distant light [1] across the quiet water until she reached the old lighthouse. Tomorrow she would return.\n\n";
+                String text = paragraph.repeat(80);
+                java.util.List<Books.Note> notes = new java.util.ArrayList<>();
+                for (int at = text.indexOf("[1]"); at >= 0; at = text.indexOf("[1]", at + 3))
+                    notes.add(new Books.Note(at, at + 3, "The lighthouse guided travelers safely home.\n\n".repeat(scenario >= 2 ? 30 : 1)));
+                Books.Book book = new Books.Book("note-spotlight-" + scenario, "Lighthouse", "MJReader Originals", text,
+                        java.util.List.of(new Books.Chapter("Lighthouse", 0)), null, java.util.List.of(), notes);
+                MainActivity screen = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                try {
+                    awaitField(screen, "librarySearch");
+                    runOnMainSync(() -> invoke(screen, "open", new Class[]{Books.Book.class, boolean.class}, book, false));
+                    int offset;
+                    if (scenario < 2) {
+                        ReaderPages pages = awaitPages(screen);
+                        ReaderPages.Page page = pages.visiblePages().get(scenario == 1 ? 1 : 0);
+                        offset = notes.stream().filter(n -> ReadingText.sentence(text, n.start(), n.end())[0] >= page.start() && n.end() < page.end()).findFirst().orElseThrow().start();
+                        int[] sentence = ReadingText.sentence(text, offset, offset + 3);
+                        android.graphics.RectF bounds = new android.graphics.RectF();
+                        pages.selection(sentence[0], sentence[1]).computeBounds(bounds, true);
+                        if (bounds.isEmpty() || scenario == 1 && bounds.left < pages.getWidth() / 2f)
+                            throw new AssertionError("Sentence highlight missing from the second page");
+                    } else { awaitField(screen, "body"); Thread.sleep(250); offset = notes.get(0).start(); }
+                    int anchor = (int) field(screen, "anchor");
+                    runOnMainSync(() -> invoke(screen, "showNote", new Class[]{int.class}, offset));
+                    waitForIdleSync(); Thread.sleep(250);
+                    AlertDialog dialog = (AlertDialog) field(screen, "notePopup");
+                    View decor = dialog.getWindow().getDecorView();
+                    View close = decor.findViewWithTag("dialog-close");
+                    View backdrop = decor.findViewWithTag("note-spotlight");
+                    ScrollView scroll = decor.findViewWithTag("dialog-scroll");
+                    android.graphics.Rect visible = new android.graphics.Rect();
+                    capture("note-spotlight-" + scenario);
+                    if (backdrop == null || !backdrop.getContentDescription().toString().startsWith("Mira followed")
+                            || !close.getGlobalVisibleRect(visible) || visible.height() != close.getHeight() || scroll.getHeight() < 24)
+                        throw new AssertionError("Note context, close button or text viewport missing: scenario=" + scenario + " viewport=" + scroll.getHeight() + " close=" + visible + "/" + close.getHeight() + " header=" + ((View) close.getParent()).getHeight() + " card=" + decor.findViewWithTag("note-card").getHeight() + " context=" + (backdrop == null ? "null" : backdrop.getContentDescription()));
+                    capture("note-spotlight-" + scenario);
+                    if (scenario >= 2) {
+                        runOnMainSync(() -> scroll.scrollTo(0, scroll.getChildAt(0).getHeight())); waitForIdleSync();
+                        if (scroll.getScrollY() <= 0 || !close.getGlobalVisibleRect(visible) || visible.height() != close.getHeight())
+                            throw new AssertionError("Long note cannot scroll with a pinned close button: scenario=" + scenario + " scroll=" + scroll.getScrollY() + " close=" + visible + "/" + close.getHeight());
+                    }
+                    if (scenario == 1) runOnMainSync(() -> invoke(screen, "shell"));
+                    else if (scenario == 2) runOnMainSync(dialog::onBackPressed);
+                    else runOnMainSync(backdrop::performClick);
+                    waitForIdleSync();
+                    if (dialog.isShowing() || field(screen, "notePopup") != null || (int) field(screen, "anchor") != anchor)
+                        throw new AssertionError("Dismissing/rebuilding note changed reading position or retained snapshot");
+                } finally { runOnMainSync(screen::finish); }
+            }
+        } finally {
+            prefs.edit().putString("options", saved).commit();
+            shell("wm size 430x932"); shell("settings put system font_scale 1.0"); shell("settings put global animator_duration_scale 1");
+        }
+    }
+    private void noteHitCheck() {
+        String text = "Mira [1] [2] follows the stars.";
+        var notes = java.util.List.of(new Books.Note(5, 8, "First"), new Books.Note(9, 12, "Second"));
+        Books.Book book = new Books.Book("hit-test", "Notes", "", text, java.util.List.of(), null, java.util.List.of(), notes);
+        android.text.TextPaint paint = new android.text.TextPaint(); paint.setTextSize(10);
+        android.text.StaticLayout layout = android.text.StaticLayout.Builder.obtain(text, 0, text.length(), paint, 300).build();
+        for (Books.Note note : notes) {
+            float x = (layout.getPrimaryHorizontal(note.start()) + layout.getPrimaryHorizontal(note.end())) / 2;
+            if (ReaderText.noteHit(book, layout, 0, 0, text.length(), x, 0, 1) != note.start())
+                throw new AssertionError("Overlapping hit targets chose the wrong note");
+        }
+        float right = layout.getPrimaryHorizontal(12);
+        if (ReaderText.noteHit(book, layout, 0, 0, text.length(), right + 6, 3, 1) != 9
+                || ReaderText.noteHit(book, layout, 0, 0, text.length(), 290, 3, 1) != -1)
+            throw new AssertionError("Expanded note target bounds");
+    }
     private void openingAndNotesCheck(Books store) throws Exception {
         noteBoundariesCheck();
+        noteHitCheck();
         Context context = getTargetContext();
         var prefs = context.getSharedPreferences("reader", 0); String previous = prefs.getString("options", "{}");
         String fb2 = "<FictionBook xmlns='http://www.gribuser.ru/xml/fictionbook/2.0' xmlns:l='http://www.w3.org/1999/xlink'><description><title-info><book-title>Footnotes FB2</book-title></title-info></description>"
@@ -1492,8 +1582,9 @@ public class ReaderSmokeTest extends Instrumentation {
                         layout = page.layout(); from = page.sourceStart(); top = Math.round(12 * context.getResources().getDisplayMetrics().density) - page.top();
                         margin = Math.round(8 * context.getResources().getDisplayMetrics().density);
                     } else { layout = ((TextView) textView).getLayout(); from = (int) field(active, "textStart"); top = textView.getPaddingTop(); margin = textView.getPaddingLeft(); }
-                    int at = note.start() - from + 1, line = layout.getLineForOffset(at); int[] location = new int[2]; textView.getLocationOnScreen(location);
-                    point[0] = location[0] + margin + layout.getPrimaryHorizontal(at);
+                    int at = note.end() - from, line = layout.getLineForOffset(at); int[] location = new int[2]; textView.getLocationOnScreen(location);
+                    // Tap outside the printed marker, including at the 10 sp minimum.
+                    point[0] = location[0] + margin + layout.getPrimaryHorizontal(at) + 6 * context.getResources().getDisplayMetrics().density;
                     point[1] = location[1] + top + (layout.getLineTop(line) + layout.getLineBottom(line)) / 2f;
                 });
                 long now = android.os.SystemClock.uptimeMillis();

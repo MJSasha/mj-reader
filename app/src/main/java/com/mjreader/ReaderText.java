@@ -58,11 +58,27 @@ final class ReaderText {
         }
         return text;
     }
-    static int hit(Layout layout, float x, float y) {
-        if (layout == null || y < 0 || y >= layout.getHeight()) return -1;
-        int line = layout.getLineForVertical((int) y);
-        if (x < layout.getLineLeft(line) || x > layout.getLineRight(line)) return -1;
-        return layout.getOffsetForHorizontal(line, x);
+    static int noteHit(Books.Book book, Layout layout, int source, int from, int to, float x, float y, float density) {
+        if (layout == null) return -1;
+        int best = -1; float distance = Float.MAX_VALUE;
+        android.graphics.Path path = new android.graphics.Path();
+        android.graphics.RectF bounds = new android.graphics.RectF();
+        for (Books.Note note : book.notes()) {
+            int start = Math.max(from, note.start()) - source, end = Math.min(to, note.end()) - source;
+            if (start < 0 || end <= start || end > layout.getText().length()) continue;
+            int first = layout.getLineForOffset(start), last = layout.getLineForOffset(end - 1);
+            for (int line = first; line <= last; line++) {
+                path.reset(); layout.getSelectionPath(Math.max(start, layout.getLineStart(line)), Math.min(end, layout.getLineEnd(line)), path);
+                path.computeBounds(bounds, true);
+                float dx = Math.max(0, Math.max(bounds.left - x, x - bounds.right));
+                float dy = Math.max(0, Math.max(bounds.top - y, y - bounds.bottom));
+                float padX = Math.max(8 * density, (48 * density - bounds.width()) / 2);
+                float padY = Math.max(6 * density, (48 * density - bounds.height()) / 2);
+                float score = dx * dx + dy * dy;
+                if (dx <= padX && dy <= padY && score < distance) { best = note.start(); distance = score; }
+            }
+        }
+        return best;
     }
     static final int NOTE_ACTION = 0x01000000;
     static void noteActions(Books.Book book, android.view.accessibility.AccessibilityNodeInfo info, int from, int to) {

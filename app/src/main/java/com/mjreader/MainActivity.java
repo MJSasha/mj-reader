@@ -49,6 +49,7 @@ public class MainActivity extends Activity {
     private static java.lang.ref.WeakReference<MainActivity> active = new java.lang.ref.WeakReference<>(null);
     private ScrollView textScroll;
     private ReaderPages pageReader;
+    private AlertDialog notePopup;
     private int pictureRequest, restoreRequest;
     private TextView body, counter, contextLabel, chapterLabel, importStatus;
     private FocusView focusView;
@@ -172,7 +173,7 @@ public class MainActivity extends Activity {
         state.putInt("settingsY", settingsScroll == null ? 0 : settingsScroll.getScrollY());
         super.onSaveInstanceState(state);
     }
-    @Override protected void onPause() { pause(); super.onPause(); }
+    @Override protected void onPause() { if (notePopup != null) notePopup.dismiss(); pause(); super.onPause(); }
     @Override protected void onDestroy() {
         unregisterReceiver(downloadedBooks);
         handler.removeCallbacksAndMessages(null);
@@ -220,6 +221,7 @@ public class MainActivity extends Activity {
         getWindow().setAttributes(attributes);
     }
     private void shell() {
+        if (notePopup != null) notePopup.dismiss();
         renderVersion++;
         if (root != null) root.animate().cancel();
         getWindow().setBackgroundDrawable(new ColorDrawable(options.background()));
@@ -980,8 +982,9 @@ public class MainActivity extends Activity {
         GestureDetector gestures = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onDown(android.view.MotionEvent event) { return true; }
             @Override public boolean onSingleTapUp(android.view.MotionEvent event) {
-                int offset = ReaderText.hit(body.getLayout(), event.getX() - body.getPaddingLeft(), event.getY() - body.getPaddingTop());
-                if (offset >= 0 && showNote(textStart + offset)) return true;
+                int offset = ReaderText.noteHit(current, body.getLayout(), textStart, textStart, textEnd,
+                        event.getX() - body.getPaddingLeft(), event.getY() - body.getPaddingTop(), getResources().getDisplayMetrics().density);
+                if (offset >= 0 && showNote(offset)) return true;
                 body.performClick();
                 return true;
             }
@@ -1123,8 +1126,31 @@ public class MainActivity extends Activity {
     private boolean showNote(int offset) {
         if (current == null || offset < 0) return false;
         for (Books.Note note : current.notes()) if (offset >= note.start() && offset < note.end()) {
-            dialogs().setTitle(tr("Сноска ", "Note ") + current.text().substring(note.start(), note.end()))
-                    .setMessage(note.text()).setPositiveButton(android.R.string.ok, null).show();
+            if (notePopup != null) notePopup.dismiss();
+            int[] sentence = ReadingText.sentence(current.text(), note.start(), note.end());
+            Path selection = new Path(); View source = pageReader != null ? pageReader : body;
+            if (pageReader != null) selection = pageReader.selection(sentence[0], sentence[1]);
+            else if (body != null && body.getLayout() != null) {
+                int from = Math.max(sentence[0], textStart) - textStart, to = Math.min(sentence[1], textEnd) - textStart;
+                if (to > from) body.getLayout().getSelectionPath(from, to, selection);
+                selection.offset(body.getPaddingLeft(), body.getPaddingTop());
+            }
+            int[] rootPosition = new int[2], sourcePosition = new int[2]; root.getLocationOnScreen(rootPosition);
+            if (source != null) source.getLocationOnScreen(sourcePosition);
+            selection.offset(sourcePosition[0] - rootPosition[0], sourcePosition[1] - rootPosition[1]);
+            Rect visible = new Rect();
+            if (source != null && source.getGlobalVisibleRect(visible)) {
+                Path clip = new Path(); clip.addRect(visible.left - rootPosition[0], visible.top - rootPosition[1],
+                        visible.right - rootPosition[0], visible.bottom - rootPosition[1], Path.Direction.CW);
+                selection.op(clip, Path.Op.INTERSECT);
+            } else selection.reset();
+            ReaderSpotlight backdrop = new ReaderSpotlight(this, root, selection, options);
+            backdrop.setContentDescription(current.text().substring(sentence[0], sentence[1]));
+            RectF location = new RectF(); selection.computeBounds(location, true); location.offset(rootPosition[0], rootPosition[1]);
+            notePopup = dialogs().setTitle(tr("Сноска ", "Note ") + current.text().substring(note.start(), note.end()))
+                    .setMessage(note.text()).setPositiveButton(android.R.string.ok, null).setBackdrop(backdrop, location).create();
+            notePopup.setOnDismissListener(d -> notePopup = null);
+            notePopup.show();
             return true;
         }
         return false;
@@ -1738,8 +1764,21 @@ public class MainActivity extends Activity {
             }
         }
         LinearLayout updates = settingsGroup(page, tr("Приложение", "Application"));
-        updates.addView(button(tr("Обновления", "Updates") + " · " + AppUpdates.version(this), false,
-                () -> startActivity(new Intent(this, UpdateActivity.class))), matchWrap());
+        LinearLayout updateRow = row(); updateRow.setTag("updates-entry");
+        updateRow.setPadding(0, dp(4), 0, dp(4)); updateRow.setMinimumHeight(dp(56));
+        updateRow.setBackground(feedback(shape(options.surface(), 14)));
+        ImageView updateIcon = new ImageView(this); updateIcon.setImageDrawable(new ReaderIcon(this, "download", options.accent()));
+        updateIcon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        updateRow.addView(updateIcon, new LinearLayout.LayoutParams(dp(24), dp(24))); space(updateRow);
+        LinearLayout updateText = column(); updateText.addView(label(tr("Обновления", "Updates"), 16, options.ink())); gap(updateText, 4);
+        updateText.addView(label(tr("Версия ", "Version ") + AppUpdates.version(this), 13, options.muted()));
+        updateRow.addView(updateText, weight()); space(updateRow);
+        ImageView updateArrow = new ImageView(this); updateArrow.setImageDrawable(new ControlIcon("→", options.muted()));
+        updateArrow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        updateRow.addView(updateArrow, new LinearLayout.LayoutParams(dp(24), dp(24)));
+        updateRow.setContentDescription(tr("Обновления. Версия ", "Updates. Version ") + AppUpdates.version(this));
+        updateRow.setFocusable(true); updateRow.setOnClickListener(v -> startActivity(new Intent(this, UpdateActivity.class)));
+        updates.addView(updateRow, matchWrap());
         int scrollY = settingsY;
         ScrollView scroll = settingsScroll;
         scroll.post(() -> scroll.scrollTo(0, scrollY));

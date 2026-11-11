@@ -4,6 +4,7 @@ import android.app.AlertDialog;
 import android.content.*;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.graphics.RectF;
 import android.graphics.drawable.*;
 import android.os.Bundle;
 import android.view.*;
@@ -16,7 +17,8 @@ final class ReaderDialogs {
     private final Context context;
     private final ReaderOptions theme;
     private String title, message;
-    private View custom;
+    private View custom, backdrop;
+    private RectF spotlight;
     private CharSequence[] items;
     private boolean[] checked;
     private DialogInterface.OnClickListener itemClick;
@@ -27,6 +29,7 @@ final class ReaderDialogs {
     ReaderDialogs(Context context, ReaderOptions theme) { this.context = context; this.theme = theme; }
     ReaderDialogs setTitle(String value) { title = value; return this; }
     ReaderDialogs setMessage(String value) { message = value; return this; }
+    ReaderDialogs setBackdrop(View view, RectF anchor) { backdrop = view; spotlight = new RectF(anchor); return this; }
     ReaderDialogs setView(View value) { custom = value; return this; }
     ReaderDialogs setItems(CharSequence[] values, DialogInterface.OnClickListener click) {
         items = values; itemClick = click; return this;
@@ -60,7 +63,7 @@ final class ReaderDialogs {
                 page.setPadding(dp(20), dp(12), dp(20), dp(16));
                 page.setBackground(shape(theme.surface(), 24));
                 LinearLayout header = new LinearLayout(context);
-                header.setGravity(Gravity.TOP);
+                header.setGravity(Gravity.TOP); header.setBaselineAligned(false);
                 TextView heading = text(title == null ? "" : title, 22);
                 heading.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
                 heading.setMaxLines(2); heading.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -129,12 +132,57 @@ final class ReaderDialogs {
                     if (footer.getChildCount() > 0) footer.addView(new View(context), new LinearLayout.LayoutParams(horizontal ? dp(8) : 1, horizontal ? 1 : dp(8)));
                     footer.addView(button, horizontal ? new LinearLayout.LayoutParams(0, -2, 1) : new LinearLayout.LayoutParams(-1, -2));
                 }
-                setContentView(page);
+                if (backdrop == null) setContentView(page);
+                else {
+                    page.setTag("note-card"); page.setClickable(true); page.setElevation(dp(12));
+                    FrameLayout overlay = new FrameLayout(context) {
+                        @Override protected void onLayout(boolean changed, int l, int t, int r, int b) {
+                            backdrop.layout(0, 0, getWidth(), getHeight());
+                            int[] origin = new int[2]; getLocationOnScreen(origin);
+                            RectF anchor = new RectF(spotlight); anchor.offset(-origin[0], -origin[1]);
+                            int top = getPaddingTop() + dp(16), bottom = getHeight() - getPaddingBottom() - dp(16);
+                            int below = Math.max(0, bottom - (int) anchor.bottom - dp(16));
+                            int above = Math.max(0, (int) anchor.top - dp(16) - top);
+                            boolean after = below >= above;
+                            int available = Math.max(above, below);
+                            boolean compact = available < dp(144);
+                            if (compact) available = Math.max(dp(96), (bottom - top) / 2);
+                            int width = Math.min(getWidth() - dp(32) - getPaddingLeft() - getPaddingRight(), dp(480));
+                            page.measure(MeasureSpec.makeMeasureSpec(Math.max(1, width), MeasureSpec.EXACTLY),
+                                    MeasureSpec.makeMeasureSpec(Math.max(1, available), MeasureSpec.AT_MOST));
+                            int x = Math.max(getPaddingLeft() + dp(16), Math.min(getWidth() - getPaddingRight() - dp(16) - width,
+                                    (int) anchor.centerX() - width / 2));
+                            int y = compact ? bottom - page.getMeasuredHeight()
+                                    : after ? (int) anchor.bottom + dp(16) : (int) anchor.top - dp(16) - page.getMeasuredHeight();
+                            y = Math.max(top, Math.min(bottom - page.getMeasuredHeight(), y));
+                            page.layout(x, y, x + page.getMeasuredWidth(), y + page.getMeasuredHeight());
+                        }
+                    };
+                    overlay.setOnApplyWindowInsetsListener((v, insets) -> {
+                        v.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                                insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+                        return insets;
+                    });
+                    backdrop.setOnClickListener(v -> cancel());
+                    backdrop.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+                    overlay.addView(backdrop, new FrameLayout.LayoutParams(-1, -1));
+                    overlay.addView(page, new FrameLayout.LayoutParams(-1, -2));
+                    setContentView(overlay);
+                    if (android.animation.ValueAnimator.areAnimatorsEnabled()) {
+                        page.setAlpha(0); page.setTranslationY(dp(8));
+                        page.animate().alpha(1).translationY(0).setDuration(160).start();
+                    }
+                }
                 Window window = getWindow();
                 if (window != null) {
                     window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
                     window.setLayout(Math.min(context.getResources().getDisplayMetrics().widthPixels - dp(32), dp(560)), -2);
                     window.setDimAmount(.65f);
+                    if (backdrop != null) {
+                        window.setLayout(-1, -1); window.setDimAmount(0); window.setWindowAnimations(0);
+                        window.getDecorView().setSystemUiVisibility(theme.light()
+                                ? View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR : 0);
+                    }
                     EditText input = firstInput(custom);
                     if (input != null) {
                         // AlertDialog's empty stock content marks the window as unsuitable for the IME.
