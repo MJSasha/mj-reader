@@ -654,6 +654,25 @@ public class ReaderSmokeTest extends Instrumentation {
         }
         return null;
     }
+    private void awaitDialogKeyboard(View decor) throws Exception {
+        int[] previous = null; int stable = 0;
+        // A cold CI keyboard can start after the dialog's first layout. Its animation
+        // moves the entire window; only compare scrolling after that movement settles.
+        for (int retry = 0; retry < 100; retry++) {
+            int[] geometry = new int[5];
+            runOnMainSync(() -> {
+                android.view.WindowInsets insets = decor.getRootWindowInsets();
+                geometry[0] = insets != null && insets.isVisible(android.view.WindowInsets.Type.ime()) ? 1 : 0;
+                int[] location = new int[2]; decor.getLocationOnScreen(location);
+                geometry[1] = location[0]; geometry[2] = location[1];
+                geometry[3] = decor.getWidth(); geometry[4] = decor.getHeight();
+            });
+            stable = geometry[0] == 1 && java.util.Arrays.equals(previous, geometry) ? stable + 1 : 0;
+            if (stable >= 5) return;
+            previous = geometry; Thread.sleep(50);
+        }
+        throw new AssertionError("Dialog keyboard did not become visible with stable bounds");
+    }
     private void pinnedDialogCloseCheck() throws Exception {
         Context context = getTargetContext();
         try {
@@ -677,6 +696,7 @@ public class ReaderSmokeTest extends Instrumentation {
                     });
                     waitForIdleSync(); Thread.sleep(300);
                     View decor = dialog[0].getWindow().getDecorView();
+                    if (scenario == 3) awaitDialogKeyboard(decor);
                     View close = decor.findViewWithTag("dialog-close");
                     ScrollView scroll = decor.findViewWithTag("dialog-scroll");
                     int[] before = new int[2]; runOnMainSync(() -> close.getLocationOnScreen(before));
@@ -686,7 +706,9 @@ public class ReaderSmokeTest extends Instrumentation {
                         android.graphics.Rect visible = new android.graphics.Rect();
                         if (!close.getGlobalVisibleRect(visible) || visible.height() != close.getHeight()
                                 || visible.width() != close.getWidth() || before[1] != after[1])
-                            throw new AssertionError("Close button moved or was clipped while scrolling");
+                            throw new AssertionError("Close button moved or was clipped while scrolling: scenario=" + mode
+                                    + " before=" + java.util.Arrays.toString(before) + " after=" + java.util.Arrays.toString(after)
+                                    + " visible=" + visible + " size=" + close.getWidth() + "x" + close.getHeight());
                         if (scroll.getScrollY() <= 0) throw new AssertionError("Dialog body did not scroll");
                         if (close.getContentDescription() == null) throw new AssertionError("Close has no accessible name");
                         assertTouchTargets(close);
