@@ -160,11 +160,13 @@ public class CatalogActivity extends Activity {
         submit.setBackground(theme.feedback(shape(theme.accent(), 14), getResources().getDisplayMetrics().density));
         submit.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, "search", theme.onAccent()), null, null, null);
         searchBox.addView(submit); content.addView(searchBox); gap(content, 10);
-        LinearLayout tools = row();
+        boolean stackedTools = getResources().getConfiguration().screenWidthDp < 400
+                && getResources().getConfiguration().fontScale >= 1.6f;
+        LinearLayout tools = stackedTools ? column() : row();
         Button scope = textAction(authors ? tr("По автору", "By author") : tr("По названию", "By title"), "sort", this::searchOptions);
-        scope.setBackground(theme.feedback(shape(theme.surface(), 14), getResources().getDisplayMetrics().density));
-        tools.addView(scope, weight()); space(tools);
-        tools.addView(textAction(tr("Разделы", "Browse"), "library", () -> { rememberQuery(); history.clear(); load(base(), false); }), weight());
+        tools.addView(scope, stackedTools ? match() : weight());
+        if (stackedTools) gap(tools, 8); else space(tools);
+        tools.addView(textAction(tr("Разделы", "Browse"), "library", () -> { rememberQuery(); history.clear(); load(base(), false); }), stackedTools ? match() : weight());
         content.addView(tools); gap(content, 14);
         if (!message.isEmpty()) { resultStatus = text(message, 14, theme.muted()); content.addView(resultStatus); gap(content, 10); }
         if (entries.isEmpty() && next.isEmpty()) empty(currentUrl.isEmpty() ? tr("Выбирайте, что читать дальше", "Choose your next read") : tr("Ничего не найдено", "No results"),
@@ -213,7 +215,8 @@ public class CatalogActivity extends Activity {
             if (entry.details().downloads() >= 0) facts.add(downloadCount(entry));
             if (!facts.isEmpty()) card.addView(text(String.join(" · ", facts), 12, theme.muted()));
             gap(card, 16);
-            boolean stacked = getResources().getConfiguration().fontScale >= 1.6f;
+            boolean stacked = getResources().getConfiguration().fontScale >= 1.6f
+                    || getResources().getConfiguration().screenWidthDp < 400;
             LinearLayout actions = stacked ? column() : row();
             Button details = control(tr("Подробнее", "Details"), "book", false, () -> bookDetails(entry));
             details.setContentDescription(tr("Подробнее: ", "Details: ") + entry.title());
@@ -498,7 +501,7 @@ public class CatalogActivity extends Activity {
     private Button textAction(String label, String icon, Runnable action) {
         Button button = control(label, icon, false, action); button.setTextColor(theme.muted());
         button.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, icon, theme.muted()), null, null, null);
-        button.setBackground(theme.feedback(shape(theme.background(), 12), getResources().getDisplayMetrics().density));
+        button.setBackground(theme.feedback(shape(theme.surface(), 14), getResources().getDisplayMetrics().density));
         button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL); return button;
     }
     private View navItem(String label, String icon, boolean selected, Runnable action) {
@@ -506,7 +509,10 @@ public class CatalogActivity extends Activity {
         int color = selected ? theme.onAccent() : theme.muted();
         button.setTextColor(color); button.setSelected(selected); button.setGravity(Gravity.CENTER);
         button.setTextSize(14);
-        button.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, icon, color), null, null, null);
+        if (getResources().getConfiguration().screenWidthDp < 400
+                && getResources().getConfiguration().fontScale >= 1.6f)
+            button.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, null, null);
+        else button.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, icon, color), null, null, null);
         return button;
     }
     private LinearLayout column() { LinearLayout view = new LinearLayout(this); view.setOrientation(LinearLayout.VERTICAL); return view; }

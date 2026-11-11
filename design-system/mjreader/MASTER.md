@@ -33,8 +33,10 @@ Compact chapter header; quick appearance behind the type icon. Footer has contex
 
 - App updates use the shared colors, outline icons, tonal feedback and accessible switch drawing. A scrolling update screen keeps notes/actions reachable on short windows; install and unknown-source permission remain explicit native Android steps.
 
-- Catalog cards limit previews to two lines, combine supplied file facts, and put Details / Download in one row; font scale 1.6 and above stacks those actions. Completed downloads hide transfer meters. Empty catalog/download screens provide a direct browse action. The reader chapter header opens contents; header actions have explicit 8 dp gaps.
+- Catalog cards limit previews to two lines, combine supplied file facts, and put Details / Download in one row; windows narrower than 400 dp or font scale 1.6 and above stack those actions. Completed downloads hide transfer meters. Empty catalog/download screens provide a direct browse action. The reader chapter header opens contents; header actions have explicit 8 dp gaps.
 
 - Masthead settings icons have no contrasting resting frame: use the screen background, retaining tonal press feedback, keyboard focus and a 48 dp target.
 
 - Text size has a bounded live excerpt next to its slider. Preview updates during dragging; book pagination reflows on release. Quick typography uses a bottom-aligned undimmed sheet; short wide windows put preview and slider side by side. Other appearance controls remain in full settings.
+
+- Below 400 dp, library shelf filters get a full row; filter/sort actions sit beside the shelf heading. Bottom library actions use text without redundant icons, and stack at font scale 1.6+. Narrow settings tabs omit icons and give Appearance more width; large fonts stack them. Catalog search controls stack with large fonts, while its bottom destinations keep labels and omit icons. Preserve 48 dp targets and 8 dp gaps.

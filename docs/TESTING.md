@@ -38,7 +38,7 @@ you want to keep. There is no implicit device selection.
 | `smoke` | External VIEW/SEND open/duplicate handling, 10 sp pages, EPUB/FB2 footnotes, standalone/nested/named/XML anchors, adjacent-note boundaries, paragraph preservation and repair, Batch/invalid imports, targeted reimport menu/cancel/wrong-file rejection, TXT/FB2 encodings, FB2.ZIP/embedded assets/chapter offsets/repair/invalid XML, EPUB cover/navigation, duplicates/repair, metadata, collections, reversible deletion, search, bookmarks, RU/EN RSVP, persistence | None |
 | `catalog` | Local HTTPS OPDS, slow-mirror hedge/cancellation, truncated download retry, retries/failover, next pages, cover/chapter import, cancellation/retry, background download, zipped FB2 download/import, keyboard, themes, retained pages | Local test server only |
 | `visual` | Live text-size preview during dragging, reader anchor preservation, simultaneous preview/slider visibility in short windows, resume/search/quick-filter/deleted-book behavior, library/settings/dialogs, custom selectors, reachable actions, light/dark, font scale 2, short landscape, settings restoration | None |
-| `adaptive` | 360/540/740/800/900/1040 dp windows, minor and major resizes, reader position/fullscreen, exact page seams, arrow-driven forward/back slides in both themes, left/right edge taps and center controls on phones/spreads including fullscreen, no scroll arrows, interrupted turns/reduced motion, one/two-page reflow, illustrated EPUB repair, large-text pages, catalog draft/pages/scroll, control states/targets | Emulator resize permission |
+| `adaptive` | 320/360 dp narrow windows, 1080×2520 px at 420 dpi (Flip 7 inner-display proportions), RU/EN button labels, font scale 2, Browse surface, settings tabs, 360/540/740/800/900/1040 dp windows, minor and major resizes, reader position/fullscreen, exact page seams, arrow-driven forward/back slides in both themes, left/right edge taps and center controls on phones/spreads including fullscreen, no scroll arrows, interrupted turns/reduced motion, one/two-page reflow, illustrated EPUB repair, large-text pages, catalog draft/pages/scroll, control states/targets | Emulator resize permission |
 
 Run a targeted subset with `--suites catalog,adaptive`. Reports are written under
 `dist/reports/android`: plain logs, JUnit XML and screenshots by suite. A missing `PASS:`
@@ -47,7 +47,8 @@ marker is a failure even if `adb` exits zero. CI uploads those reports on failur
 ## Manual and optional checks
 
 - Light and dark independently; also Dusk and Sepia when changing color tokens.
-- Phone portrait, wide Fold/tablet, short landscape, font scale 2 and animations disabled.
+- Narrow phone portrait (320×747 and 360×840 dp), Flip 7 inner-display proportions (1080×2520 px at a test density of 420 dpi, about 411 dp wide), wide Fold/tablet, short landscape, font scale 2 and animations disabled. The test density is not a claim about Samsung’s default display scaling.
+- The `adaptive` suite captures library, catalog, downloads, settings, scrolling and paged reading at narrow widths; checks prevent split button words, wrapped settings tabs, missing button surfaces and targets smaller than 48 dp.
 - Actual tap/long press, menu actions, hover/focus, keyboard opening and dismissal.
 - Resize while reading, searching and downloading; preserve user context.
 - A physical Fold is still required to assess the actual hinge/Flex posture and device-specific behavior.

@@ -37,7 +37,7 @@ public class ReaderSmokeTest extends Instrumentation {
             AppUpdates.prefs(context).edit().putBoolean("automatic", false).commit();
             if (updatesOnly) { new UpdateCheck(this).run(updateFixture); result.putString("stream", "PASS: OTA release selection, checksum/signature/version rejection, daily check limit, themed UI and persisted download cancellation\n"); finish(Activity.RESULT_OK, result); return; }
             if (showcaseOnly) { showcase(); result.putString("stream", "PASS: original demonstration screenshots\n"); finish(Activity.RESULT_OK, result); return; }
-            if (adaptiveOnly) { adaptiveCheck(); pagesCheck(); result.putString("stream", "PASS: phone/Fold/tablet resize, grid, reader position/fullscreen, EPUB illustration repair, exact page seams, one/two-page reflow, catalog retention, hover/focus and touch targets\n"); finish(Activity.RESULT_OK, result); return; }
+            if (adaptiveOnly) { narrowScreenCheck(); adaptiveCheck(); pagesCheck(); result.putString("stream", "PASS: narrow 320/360 dp and Flip 7 proportions, RU/EN labels, phone/Fold/tablet resize, grid, reader position/fullscreen, EPUB illustration repair, exact page seams, one/two-page reflow, catalog retention, hover/focus and touch targets\n"); finish(Activity.RESULT_OK, result); return; }
             if (catalogOnly) { new CatalogCheck(this).run(liveCatalog); result.putString("stream", "PASS: OPDS failover, HTTPS EPUB download, cover/chapters import, cancellation/retry, background import, themed UI and recreation\n"); finish(Activity.RESULT_OK, result); return; }
             if (benchmarkOnly) {
                 benchmarkCheck(result);
@@ -808,6 +808,86 @@ public class ReaderSmokeTest extends Instrumentation {
             for (String key : prefs.getAll().keySet()) if (key.contains("showcase-")) editor.remove(key);
             editor.apply(); shell("wm size 430x932");
         }
+    }
+    private void narrowScreenCheck() throws Exception {
+        Context context = getTargetContext(); var prefs = context.getSharedPreferences("reader", 0);
+        String saved = prefs.getString("options", "{}");
+        try {
+            for (int scenario = 0; scenario < 4; scenario++) {
+                boolean large = scenario == 3;
+                // 1080x2520 is the Flip 7 inner-panel resolution; 420 dpi is a test density, not an OEM default.
+                shell("wm size " + (scenario == 1 ? "1080x2520" : scenario == 2 ? "320x747" : "360x840"));
+                shell("wm density " + (scenario == 1 ? "420" : "160"));
+                shell("settings put system font_scale " + (large ? "2.0" : "1.0"));
+                shell("cmd locale set-app-locales com.mjreader --locales " + (scenario == 1 ? "en-US" : "ru"));
+                prefs.edit().putString("options", "{\"theme\":" + (scenario == 1 || scenario == 2 ? 2 : 0) + ",\"pages\":true}").commit();
+                MainActivity screen = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                try {
+                    awaitField(screen, "librarySearch"); waitForIdleSync();
+                    assertChrome(screen, (ListView) field(screen, "libraryList"));
+                    assertTouchTargets(screen.getWindow().getDecorView());
+                    ViewGroup root = (ViewGroup) field(screen, "root");
+                    assertReadableActions(root.getChildAt(root.getChildCount() - 1));
+                    capture("narrow-library-" + scenario);
+                    Books.Book book = new Books(context).list().stream().filter(b -> b.id().equals("demo-en")).findFirst().orElseThrow();
+                    runOnMainSync(() -> invoke(screen, "open", new Class[]{Books.Book.class, boolean.class}, book, false));
+                    ReaderPages pages = awaitPages(screen); waitForIdleSync();
+                    if (pages.columns() != 1) throw new AssertionError("Narrow reader must show one page");
+                    assertTouchTargets(screen.getWindow().getDecorView()); capture("narrow-reader-" + scenario);
+                    int anchor = (int) field(screen, "anchor");
+                    runOnMainSync(() -> { ((ReaderOptions) field(screen, "options")).put("pages", false); invoke(screen, "changedOptions"); });
+                    awaitField(screen, "body"); waitForIdleSync();
+                    if ((int) field(screen, "anchor") != anchor) throw new AssertionError("Narrow reading mode switch moved anchor");
+                    capture("narrow-scroll-" + scenario);
+                    runOnMainSync(() -> invoke(screen, "settings", new Class[]{boolean.class}, false)); waitForIdleSync();
+                    assertTouchTargets(screen.getWindow().getDecorView());
+                    TextView tab = find(screen.getWindow().getDecorView(), scenario == 1 ? "Appearance" : "Оформление");
+                    if (tab == null || tab.getLineCount() != 1) throw new AssertionError("Narrow settings tab wraps");
+                    capture("narrow-settings-" + scenario);
+                } finally { runOnMainSync(screen::finish); }
+                CatalogActivity catalog = (CatalogActivity) startActivitySync(new Intent(context, CatalogActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                try {
+                    runOnMainSync(() -> {
+                        ((java.util.List<Flibusta.Entry>) field(catalog, "entries")).add(new Flibusta.Entry("Станция «Тишина»", "MJReader Originals",
+                                "История о маяке на орбите. A new chapter begins.", "https://example.test/orbit.epub", "epub", true));
+                        invoke(catalog, "render");
+                    }); waitForIdleSync();
+                    assertChrome(catalog, (ListView) field(catalog, "resultsList"));
+                    assertTouchTargets(catalog.getWindow().getDecorView());
+                    assertReadableActions(catalog.getWindow().getDecorView());
+                    runOnMainSync(() -> {
+                        ViewGroup root = (ViewGroup) field(catalog, "root");
+                        Button browse = (Button) find(root, catalog.getResources().getConfiguration().getLocales().get(0).getLanguage().equals("ru") ? "Разделы" : "Browse");
+                        ReaderOptions theme = (ReaderOptions) field(catalog, "theme");
+                        var normal = (android.graphics.drawable.GradientDrawable) browse.getBackground().getCurrent();
+                        if (normal.getColor().getDefaultColor() != theme.surface()) throw new AssertionError("Browse lacks button surface");
+                    });
+                    capture("narrow-catalog-" + scenario);
+                    runOnMainSync(() -> invoke(catalog, "switchTab", new Class[]{boolean.class}, true)); waitForIdleSync();
+                    assertReadableActions(catalog.getWindow().getDecorView()); capture("narrow-downloads-" + scenario);
+                } finally { runOnMainSync(catalog::finish); }
+            }
+        } finally {
+            prefs.edit().putString("options", saved).commit();
+            shell("wm size 430x932"); shell("wm density 160"); shell("settings put system font_scale 1.0");
+            shell("cmd locale set-app-locales com.mjreader --locales en-US");
+        }
+    }
+    private void assertReadableActions(View view) {
+        if (!view.isShown()) return;
+        if (view instanceof Button button && button.getText().length() > 0) {
+            android.graphics.Rect visible = new android.graphics.Rect();
+            if (button.getGlobalVisibleRect(visible) && visible.height() == button.getHeight()) {
+                android.text.Layout layout = button.getLayout(); String text = button.getText().toString();
+                for (int line = 0; line < layout.getLineCount(); line++) {
+                    int end = layout.getLineEnd(line);
+                    if (layout.getEllipsisCount(line) > 0 || end > 0 && end < text.length()
+                            && Character.isLetterOrDigit(text.charAt(end - 1)) && Character.isLetterOrDigit(text.charAt(end)))
+                        throw new AssertionError("Action label split or clipped: " + text);
+                }
+            }
+        }
+        if (view instanceof ViewGroup group) for (int i = 0; i < group.getChildCount(); i++) assertReadableActions(group.getChildAt(i));
     }
     private void adaptiveCheck() throws Exception {
         Context context = getTargetContext();

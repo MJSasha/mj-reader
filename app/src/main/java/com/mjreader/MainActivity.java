@@ -344,6 +344,7 @@ public class MainActivity extends Activity {
         gap(root, 16);
         root.addView(librarySearch, matchWrap());
         gap(root, 12);
+        boolean narrow = getResources().getConfiguration().screenWidthDp < 400;
         LinearLayout filters = row();
         HorizontalScrollView filterScroll = new HorizontalScrollView(this);
         filterScroll.setHorizontalScrollBarEnabled(false);
@@ -363,10 +364,11 @@ public class MainActivity extends Activity {
         }
         filterScroll.addView(chips);
         filters.addView(filterScroll, new LinearLayout.LayoutParams(0, -2, 1));
-        space(filters);
-        filters.addView(readerAction("filter", tr("Все фильтры", "All filters"), this::filterDialog), new LinearLayout.LayoutParams(dp(48), dp(48)));
-        space(filters);
-        filters.addView(readerAction("sort", tr("Вид и порядок", "View & sort"), this::sortDialog), new LinearLayout.LayoutParams(dp(48), dp(48)));
+        LinearLayout filterActions = narrow ? row() : filters;
+        if (!narrow) space(filters);
+        filterActions.addView(readerAction("filter", tr("Все фильтры", "All filters"), this::filterDialog), new LinearLayout.LayoutParams(dp(48), dp(48)));
+        space(filterActions);
+        filterActions.addView(readerAction("sort", tr("Вид и порядок", "View & sort"), this::sortDialog), new LinearLayout.LayoutParams(dp(48), dp(48)));
         root.addView(filters);
         if (filter.equals("all")) {
             Books.Book recent = books.stream().filter(book -> !prefs.getBoolean(key(book, "deleted"), false)
@@ -381,7 +383,11 @@ public class MainActivity extends Activity {
         gap(root, 16);
         TextView shelf = label(filterLabel(), 18, options.ink());
         shelf.setTypeface(Typeface.DEFAULT_BOLD);
-        root.addView(shelf);
+        if (narrow) {
+            LinearLayout shelfRow = row();
+            shelfRow.addView(shelf, weight()); space(shelfRow);
+            shelfRow.addView(filterActions); root.addView(shelfRow);
+        } else root.addView(shelf);
         gap(root, 4);
         libraryList = new ListView(this);
         libraryList.setDivider(null);
@@ -434,8 +440,16 @@ public class MainActivity extends Activity {
         LinearLayout dock = row();
         dock.setPadding(dp(8), dp(8), dp(8), dp(8));
         dock.setBackground(shape(options.surface(), 20));
-        dock.addView(add, weight()); space(dock);
-        dock.addView(button(tr("Найти книги", "Discover"), false, () -> startActivityForResult(new Intent(this, CatalogActivity.class), 8)), weight());
+        Button discover = button(tr("Найти книги", "Discover"), false, () -> startActivityForResult(new Intent(this, CatalogActivity.class), 8));
+        boolean stackedDock = narrow && getResources().getConfiguration().fontScale >= 1.6f;
+        if (narrow) for (Button action : new Button[]{add, discover}) {
+            action.setTextSize(14);
+            action.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, null, null);
+        }
+        if (stackedDock) dock.setOrientation(LinearLayout.VERTICAL);
+        dock.addView(add, stackedDock ? matchWrap() : weight());
+        if (stackedDock) gap(dock, 8); else space(dock);
+        dock.addView(discover, stackedDock ? matchWrap() : weight());
         LinearLayout.LayoutParams dockParams = matchWrap();
         dockParams.topMargin = dp(12);
         root.addView(dock, dockParams);
@@ -1583,20 +1597,22 @@ public class MainActivity extends Activity {
         top.addView(title, weight());
         root.addView(top);
         gap(root, 16);
-        LinearLayout tabs = row();
+        boolean narrowTabs = getResources().getConfiguration().screenWidthDp < 400;
+        boolean stackedTabs = narrowTabs && getResources().getConfiguration().fontScale >= 1.6f;
+        LinearLayout tabs = stackedTabs ? column() : row();
         tabs.setPadding(dp(6), dp(6), dp(6), dp(6));
         tabs.setBackground(shape(options.surface(), 20));
         Button appearance = button(tr("Оформление", "Appearance"), !rsvp, () -> { settingsY = 0; settings(false); });
         appearance.setSelected(!rsvp);
-        tabs.addView(appearance, weight());
-        space(tabs);
+        tabs.addView(appearance, stackedTabs ? matchWrap() : new LinearLayout.LayoutParams(0, -2, narrowTabs ? 2 : 1));
+        if (stackedTabs) gap(tabs, 8); else space(tabs);
         Button focusTab = button("RSVP", rsvp, () -> { settingsY = 0; settings(true); });
         focusTab.setSelected(rsvp);
-        if (getResources().getConfiguration().fontScale >= 1.6f) {
+        if (narrowTabs || getResources().getConfiguration().fontScale >= 1.6f) {
             appearance.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, null, null);
             focusTab.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, null, null);
         }
-        tabs.addView(focusTab, weight());
+        tabs.addView(focusTab, stackedTabs ? matchWrap() : weight());
         root.addView(tabs);
         gap(root, 8);
         settingsScroll = new ScrollView(this);
