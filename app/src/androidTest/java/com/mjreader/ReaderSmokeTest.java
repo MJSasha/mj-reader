@@ -651,9 +651,58 @@ public class ReaderSmokeTest extends Instrumentation {
         }
         return null;
     }
+    private void pinnedDialogCloseCheck() throws Exception {
+        Context context = getTargetContext();
+        try {
+            for (int scenario = 0; scenario < 4; scenario++) {
+                shell("wm size " + (scenario == 2 ? "740x360" : scenario == 3 ? "320x747" : "360x840"));
+                shell("settings put system font_scale " + (scenario == 1 || scenario == 2 ? "2.0" : "1.0"));
+                MainActivity screen = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                AlertDialog[] dialog = {null}; boolean[] action = {false}; int[] dismissed = {0};
+                int mode = scenario;
+                try {
+                    awaitField(screen, "librarySearch");
+                    runOnMainSync(() -> {
+                        ReaderDialogs builder = new ReaderDialogs(screen, new ReaderOptions("{\"theme\":" + (mode % 2 == 0 ? 0 : 2) + "}"))
+                                .setTitle("A long book title and a long list of chapters")
+                                .setMessage("Long content must scroll independently of the close button. ".repeat(120));
+                        if (mode == 0 || mode == 1) builder.setNegativeButton("Delete", (d, w) -> action[0] = true)
+                                .setPositiveButton("Save", (d, w) -> action[0] = true);
+                        else if (mode == 2) builder.setNegativeButton("Cancel", null);
+                        else { EditText input = new EditText(screen); input.setText("Search draft"); builder.setView(input); }
+                        dialog[0] = builder.show(); dialog[0].setOnDismissListener(d -> dismissed[0]++);
+                    });
+                    waitForIdleSync(); Thread.sleep(300);
+                    View decor = dialog[0].getWindow().getDecorView();
+                    View close = decor.findViewWithTag("dialog-close");
+                    ScrollView scroll = decor.findViewWithTag("dialog-scroll");
+                    int[] before = new int[2]; runOnMainSync(() -> close.getLocationOnScreen(before));
+                    runOnMainSync(() -> scroll.scrollTo(0, scroll.getChildAt(0).getHeight())); waitForIdleSync();
+                    runOnMainSync(() -> {
+                        int[] after = new int[2]; close.getLocationOnScreen(after);
+                        android.graphics.Rect visible = new android.graphics.Rect();
+                        if (!close.getGlobalVisibleRect(visible) || visible.height() != close.getHeight()
+                                || visible.width() != close.getWidth() || before[1] != after[1])
+                            throw new AssertionError("Close button moved or was clipped while scrolling");
+                        if (scroll.getScrollY() <= 0) throw new AssertionError("Dialog body did not scroll");
+                        if (close.getContentDescription() == null) throw new AssertionError("Close has no accessible name");
+                        assertTouchTargets(close);
+                    });
+                    capture("dialog-pinned-close-" + scenario);
+                    // Click without an accessibility helper that could scroll the action into view.
+                    runOnMainSync(close::performClick); waitForIdleSync();
+                    if (dialog[0].isShowing() || dismissed[0] != 1 || action[0])
+                        throw new AssertionError("Close must dismiss once, without saving or deleting");
+                } finally { runOnMainSync(() -> { if (dialog[0] != null) dialog[0].dismiss(); screen.finish(); }); }
+            }
+        } finally {
+            shell("wm size 430x932"); shell("settings put system font_scale 1.0");
+        }
+    }
     private void visualCheck() throws Exception {
         libraryConvenienceCheck();
         textSizePreviewCheck();
+        pinnedDialogCloseCheck();
         Context context = getTargetContext();
         android.content.SharedPreferences prefs = context.getSharedPreferences("reader", 0);
         prefs.edit().putBoolean("grid", true).putBoolean("favorite.demo-en", true).putBoolean("favorite.demo-ru", true).apply();

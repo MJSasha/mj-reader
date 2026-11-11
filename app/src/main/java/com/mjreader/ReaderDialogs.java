@@ -49,17 +49,47 @@ final class ReaderDialogs {
             @Override public Button getButton(int which) { return buttons.get(which); }
             @Override protected void onCreate(Bundle state) {
                 super.onCreate(state);
-                LinearLayout page = column();
-                page.setPadding(dp(20), dp(20), dp(20), dp(16));
+                LinearLayout page = new LinearLayout(context) {
+                    @Override protected void onMeasure(int width, int height) {
+                        int available = Math.min(MeasureSpec.getSize(height),
+                                context.getResources().getDisplayMetrics().heightPixels - dp(64));
+                        super.onMeasure(width, MeasureSpec.makeMeasureSpec(available, MeasureSpec.AT_MOST));
+                    }
+                };
+                page.setOrientation(LinearLayout.VERTICAL);
+                page.setPadding(dp(20), dp(12), dp(20), dp(16));
                 page.setBackground(shape(theme.surface(), 24));
-                if (title != null) {
-                    TextView heading = text(title, 22);
-                    heading.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-                    page.addView(heading);
-                    gap(page, 16);
-                }
+                LinearLayout header = new LinearLayout(context);
+                header.setGravity(Gravity.TOP);
+                TextView heading = text(title == null ? "" : title, 22);
+                heading.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                heading.setMaxLines(2); heading.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                if (android.os.Build.VERSION.SDK_INT >= 28) heading.setAccessibilityHeading(true);
+                header.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
+                header.addView(new View(context), new LinearLayout.LayoutParams(dp(8), 1));
+                // Only dismiss-only actions move to the header; saving/deleting stays explicit.
+                int closeAction = labels.containsKey(-2) && actions.get(-2) == null ? -2
+                        : labels.size() == 1 && actions.get(-1) == null && "OK".equalsIgnoreCase(labels.get(-1)) ? -1 : 0;
+                String closeLabel = closeAction == 0
+                        ? (context.getResources().getConfiguration().getLocales().get(0).getLanguage().equals("ru") ? "Закрыть" : "Close")
+                        : labels.get(closeAction);
+                Button close = control("", false);
+                close.setTag("dialog-close"); close.setContentDescription(closeLabel); close.setTooltipText(closeLabel);
+                close.setMinWidth(dp(48)); close.setMinimumWidth(dp(48)); close.setPadding(0, 0, 0, 0);
+                LayerDrawable background = new LayerDrawable(new Drawable[]{
+                        theme.feedback(shape(theme.surface(), 14), context.getResources().getDisplayMetrics().density),
+                        new ReaderIcon(context, "close", theme.ink())});
+                background.setLayerSize(1, dp(24), dp(24)); background.setLayerGravity(1, Gravity.CENTER);
+                close.setBackground(background); close.setOnClickListener(v -> cancel());
+                if (closeAction != 0) buttons.put(closeAction, close);
+                header.addView(close, new LinearLayout.LayoutParams(dp(48), dp(48)));
+                page.addView(header, new LinearLayout.LayoutParams(-1, -2));
+                gap(page, 12);
                 LinearLayout body = column();
-                page.addView(body, new LinearLayout.LayoutParams(-1, -2));
+                ScrollView viewport = new ScrollView(context);
+                viewport.setTag("dialog-scroll"); viewport.setClipToPadding(false);
+                viewport.addView(body);
+                page.addView(viewport, new LinearLayout.LayoutParams(-1, -2, 1));
                 if (message != null) { body.addView(text(message, 16)); gap(body, 16); }
                 if (custom != null) body.addView(custom);
                 if (items != null) for (int i = 0; i < items.length; i++) {
@@ -81,13 +111,14 @@ final class ReaderDialogs {
                     body.addView(item, new LinearLayout.LayoutParams(-1, -2));
                     gap(body, 8);
                 }
-                if (!labels.isEmpty()) gap(page, 16);
-                boolean horizontal = labels.size() == 2 && context.getResources().getConfiguration().fontScale < 1.6f;
+                int actionCount = labels.size() - (closeAction == 0 ? 0 : 1);
+                if (actionCount > 0) gap(body, 16);
+                boolean horizontal = actionCount == 2 && context.getResources().getConfiguration().fontScale < 1.6f;
                 LinearLayout footer = column();
                 if (horizontal) footer.setOrientation(LinearLayout.HORIZONTAL);
-                page.addView(footer, new LinearLayout.LayoutParams(-1, -2));
+                body.addView(footer, new LinearLayout.LayoutParams(-1, -2));
                 int[] order = horizontal ? new int[]{-2, -3, -1} : new int[]{-1, -3, -2};
-                for (int id : order) if (labels.containsKey(id)) {
+                for (int id : order) if (labels.containsKey(id) && id != closeAction) {
                     Button button = control(labels.get(id), id == -1);
                     buttons.put(id, button);
                     button.setOnClickListener(v -> {
@@ -98,18 +129,7 @@ final class ReaderDialogs {
                     if (footer.getChildCount() > 0) footer.addView(new View(context), new LinearLayout.LayoutParams(horizontal ? dp(8) : 1, horizontal ? 1 : dp(8)));
                     footer.addView(button, horizontal ? new LinearLayout.LayoutParams(0, -2, 1) : new LinearLayout.LayoutParams(-1, -2));
                 }
-                // Scroll the entire sheet so actions remain reachable with large fonts or a keyboard.
-                ScrollView viewport = new ScrollView(context) {
-                    @Override protected void onMeasure(int width, int height) {
-                        int available = Math.min(MeasureSpec.getSize(height),
-                                context.getResources().getDisplayMetrics().heightPixels - dp(64));
-                        super.onMeasure(width, MeasureSpec.makeMeasureSpec(available, MeasureSpec.AT_MOST));
-                    }
-                };
-                viewport.setBackground(shape(theme.surface(), 24));
-                viewport.setClipToOutline(true);
-                viewport.addView(page);
-                setContentView(viewport);
+                setContentView(page);
                 Window window = getWindow();
                 if (window != null) {
                     window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
