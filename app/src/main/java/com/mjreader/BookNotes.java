@@ -48,28 +48,69 @@ final class BookNotes {
             int characters = 0;
             for (int i = 0; i < elements.getLength() && characters < 1_000_000; i++) {
                 Element element = (Element) elements.item(i);
-                String id = element.getAttribute("id");
-                if (id.isEmpty()) id = element.getAttribute("name");
-                if (id.isEmpty()) id = element.getAttributeNS("http://www.w3.org/XML/1998/namespace", "id");
+                String id = anchor(element);
                 if (id.isEmpty()) continue;
-                Element content = element;
-                if (Set.of("a", "span", "sup").contains(element.getLocalName()) && element.getParentNode() instanceof Element parent) content = parent;
-                String value = text(content); characters += value.length(); found.put(id, value);
+                String value = targetText(element); characters += value.length(); found.put(id, value);
             }
         } catch (Exception ignored) { }
         return found;
     }
-    static String text(Node node) {
-        StringBuilder output = new StringBuilder(); append(node, output);
-        return output.toString().replace('\u00A0', ' ').replaceAll("[ \\t\\r\\n]+", " ").trim();
+    private static String anchor(Element element) {
+        String id = element.getAttribute("id");
+        if (id.isEmpty()) id = element.getAttribute("name");
+        if (id.isEmpty()) id = element.getAttributeNS("http://www.w3.org/XML/1998/namespace", "id");
+        return id;
     }
-    private static void append(Node node, StringBuilder output) {
-        if (output.length() >= 16000) return;
-        if (node.getNodeType() == Node.TEXT_NODE || node.getNodeType() == Node.CDATA_SECTION_NODE) {
-            String value = node.getNodeValue(); output.append(value, 0, Math.min(value.length(), 16000 - output.length()));
-        } else {
-            for (Node child = node.getFirstChild(); child != null && output.length() < 16000; child = child.getNextSibling()) append(child, output);
-            if (node instanceof Element element && Set.of("p", "div", "section", "title", "br", "li", "v").contains(element.getLocalName())) output.append(' ');
+    static String targetText(Element target) {
+        if (!Set.of("a", "span", "sup", "em", "strong", "i", "b").contains(target.getLocalName())) return text(target);
+        Node scope = target.getParentNode();
+        while (scope instanceof Element element && !Set.of("p", "li", "div", "section", "body", "aside", "td", "title").contains(element.getLocalName()))
+            scope = scope.getParentNode();
+        String value = range(target, scope);
+        // Some exporters put only the anchor/number in a paragraph, then the note in sibling paragraphs.
+        if (value.codePoints().noneMatch(Character::isLetter) && scope instanceof Element element
+                && Set.of("p", "title").contains(element.getLocalName())) value = range(target, scope.getParentNode());
+        return value;
+    }
+    private static String range(Element target, Node scope) {
+        StringBuilder output = new StringBuilder();
+        append(target, output, false);
+        Node node = target;
+        while (node != scope && output.length() < 16000) {
+            while (node != scope && node.getNextSibling() == null) {
+                separator(node, output);
+                node = node.getParentNode();
+            }
+            if (node == scope || node == null) break;
+            node = node.getNextSibling();
+            if (!append(node, output, true)) break;
         }
+        return clean(output);
+    }
+    static String text(Node node) {
+        StringBuilder output = new StringBuilder(); append(node, output, false);
+        return clean(output);
+    }
+    private static String clean(StringBuilder output) {
+        return output.toString().replace('\u00A0', ' ').replaceAll("[ \\t\\r]+", " ")
+                .replaceAll(" *\\n *", "\n").replaceAll("\\n{3,}", "\n\n").trim();
+    }
+    private static void separator(Node node, StringBuilder output) {
+        if (output.length() < 16000 && node instanceof Element element && Set.of("p", "div", "section", "title", "br", "li", "v").contains(element.getLocalName()))
+            output.append('\n');
+    }
+    private static boolean append(Node node, StringBuilder output, boolean stopAtAnchor) {
+        if (output.length() >= 16000) return false;
+        if (stopAtAnchor && node instanceof Element element && !anchor(element).isEmpty()) return false;
+        if (node.getNodeType() == Node.TEXT_NODE || node.getNodeType() == Node.CDATA_SECTION_NODE) {
+            String value = node.getNodeValue().replaceAll("\\s+", " ");
+            output.append(value, 0, Math.min(value.length(), 16000 - output.length()));
+        } else {
+            separator(node, output);
+            for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling())
+                if (!append(child, output, stopAtAnchor)) return false;
+            separator(node, output);
+        }
+        return true;
     }
 }

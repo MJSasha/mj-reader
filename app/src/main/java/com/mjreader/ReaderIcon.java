@@ -25,7 +25,7 @@ final class ReaderIcon extends Drawable {
             case "Настройки", "Settings", "Настройки RSVP", "RSVP settings", "Профили и настройки", "Profiles & settings" -> "settings";
             case "Все книги", "All books", "Библиотека", "Library" -> "library";
             case "Вид и порядок", "View & sort", "Сортировка", "Sort order", "Отображение", "Display" -> "sort";
-            case "Читаю", "Reading", "Текст", "Text", "Статус чтения", "Reading status" -> "book";
+            case "Читаю", "Чтение", "Reading", "Текст", "Text", "Статус чтения", "Reading status" -> "book";
             case "Хочу прочитать", "Want to read", "В планах", "To read" -> "clock";
             case "Прочитано", "Finished", "Сохранить", "Save", "Сохранить заметку", "Save note" -> "check";
             case "Избранное", "Favorites", "Favorite" -> "star";
@@ -73,6 +73,7 @@ final class ReaderIcon extends Drawable {
                 for (int i = 0; i < 8; i++) { canvas.save(); canvas.rotate(i * 45, 12, 12); line(canvas, 12, 2, 12, 5); canvas.restore(); }
             }
             case "library" -> { box(canvas, 3, 4, 7, 20); box(canvas, 9, 4, 13, 20); path(canvas, 16, 5, 19, 4, 22, 19, 19, 20, 16, 5); }
+            case "filter" -> { path(canvas, 3, 5, 21, 5, 14, 13, 14, 20, 10, 18, 10, 13, 3, 5); }
             case "sort" -> { line(canvas, 4, 6, 20, 6); line(canvas, 4, 12, 15, 12); line(canvas, 4, 18, 10, 18); }
             case "book" -> { path(canvas, 12, 6, 9, 4, 3, 4, 3, 19, 9, 19, 12, 21, 15, 19, 21, 19, 21, 4, 15, 4, 12, 6, 12, 21); }
             case "clock" -> { canvas.drawCircle(12, 12, 9, paint); path(canvas, 12, 6, 12, 12, 16, 14); }

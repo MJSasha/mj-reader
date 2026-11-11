@@ -82,7 +82,12 @@ final class ReaderDialogs {
                     gap(body, 8);
                 }
                 if (!labels.isEmpty()) gap(page, 16);
-                for (int id : new int[]{-1, -3, -2}) if (labels.containsKey(id)) {
+                boolean horizontal = labels.size() == 2 && context.getResources().getConfiguration().fontScale < 1.6f;
+                LinearLayout footer = column();
+                if (horizontal) footer.setOrientation(LinearLayout.HORIZONTAL);
+                page.addView(footer, new LinearLayout.LayoutParams(-1, -2));
+                int[] order = horizontal ? new int[]{-2, -3, -1} : new int[]{-1, -3, -2};
+                for (int id : order) if (labels.containsKey(id)) {
                     Button button = control(labels.get(id), id == -1);
                     buttons.put(id, button);
                     button.setOnClickListener(v -> {
@@ -90,8 +95,8 @@ final class ReaderDialogs {
                         if (listener != null) listener.onClick(this, id);
                         dismiss();
                     });
-                    page.addView(button, new LinearLayout.LayoutParams(-1, -2));
-                    gap(page, 8);
+                    if (footer.getChildCount() > 0) footer.addView(new View(context), new LinearLayout.LayoutParams(horizontal ? dp(8) : 1, horizontal ? 1 : dp(8)));
+                    footer.addView(button, horizontal ? new LinearLayout.LayoutParams(0, -2, 1) : new LinearLayout.LayoutParams(-1, -2));
                 }
                 // Scroll the entire sheet so actions remain reachable with large fonts or a keyboard.
                 ScrollView viewport = new ScrollView(context) {
@@ -134,7 +139,7 @@ final class ReaderDialogs {
     private int dp(int value) { return Math.round(value * context.getResources().getDisplayMetrics().density); }
     private LinearLayout column() { LinearLayout view = new LinearLayout(context); view.setOrientation(LinearLayout.VERTICAL); return view; }
     private TextView text(String value, int size) {
-        TextView view = new TextView(context); view.setText(value); view.setTextSize(size); view.setTextColor(theme.ink()); return view;
+        TextView view = new TextView(context); view.setText(value); view.setTextSize(size); view.setTextColor(theme.ink()); view.setLineSpacing(dp(3), 1); return view;
     }
     private void gap(LinearLayout parent, int size) { parent.addView(new View(context), new LinearLayout.LayoutParams(1, dp(size))); }
     private GradientDrawable shape(int color, int radius) { GradientDrawable d = new GradientDrawable(); d.setColor(color); d.setCornerRadius(dp(radius)); return d; }

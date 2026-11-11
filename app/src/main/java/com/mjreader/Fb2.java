@@ -30,7 +30,7 @@ final class Fb2 {
         for (int i = 0; i < elements.getLength() && characters < 1_000_000; i++) {
             Element element = (Element) elements.item(i);
             if (element.hasAttribute("id") && references.contains(element.getAttribute("id")) && !"binary".equals(element.getLocalName())) {
-                String value = BookNotes.text(element); characters += value.length();
+                String value = BookNotes.targetText(element); characters += value.length();
                 book.targets.put(element.getAttribute("id"), value);
             }
         }

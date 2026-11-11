@@ -124,7 +124,7 @@ public class CatalogActivity extends Activity {
         getWindow().setBackgroundDrawable(new ColorDrawable(theme.background()));
         getWindow().getDecorView().setSystemUiVisibility(theme.light() ? View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR : 0);
         setContentView(root); root.requestApplyInsets();
-        LinearLayout mast = row(); mast.addView(control(tr("Назад", "Back"), "back", false, this::back));
+        LinearLayout mast = row(); mast.addView(iconButton(tr("Назад", "Back"), "back", this::back));
         TextView brand = text("MJ / READER", 12, theme.accent()); brand.setLetterSpacing(.16f); brand.setGravity(Gravity.CENTER);
         mast.addView(brand, new LinearLayout.LayoutParams(0, -1, 1));
         mast.addView(iconButton(tr("Настройки каталога", "Catalog settings"), "settings", this::catalogSettings)); root.addView(mast);
@@ -162,6 +162,7 @@ public class CatalogActivity extends Activity {
         searchBox.addView(submit); content.addView(searchBox); gap(content, 10);
         LinearLayout tools = row();
         Button scope = textAction(authors ? tr("По автору", "By author") : tr("По названию", "By title"), "sort", this::searchOptions);
+        scope.setBackground(theme.feedback(shape(theme.surface(), 14), getResources().getDisplayMetrics().density));
         tools.addView(scope, weight()); space(tools);
         tools.addView(textAction(tr("Разделы", "Browse"), "library", () -> { rememberQuery(); history.clear(); load(base(), false); }), weight());
         content.addView(tools); gap(content, 14);
@@ -194,7 +195,7 @@ public class CatalogActivity extends Activity {
         GradientDrawable tile = shape(theme.background(), 10); tile.setStroke(dp(1), theme.accent()); emblem.setBackground(tile);
         if (!entry.book()) emblem.setCompoundDrawablesRelativeWithIntrinsicBounds(null, new ReaderIcon(this, "folder", theme.accent()), null, null);
         emblem.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        heading.addView(emblem, new LinearLayout.LayoutParams(dp(52), dp(72))); space(heading);
+        heading.addView(emblem, new LinearLayout.LayoutParams(dp(52), dp(entry.book() ? 72 : 52))); space(heading);
         LinearLayout identity = column();
         String category = entry.details().genres().isEmpty() ? tr(entry.book() ? "КНИГА" : "РАЗДЕЛ", entry.book() ? "BOOK" : "SECTION") : entry.details().genres().get(0);
         TextView genre = text(category, 11, theme.accent()); genre.setMaxLines(1); genre.setEllipsize(android.text.TextUtils.TruncateAt.END); identity.addView(genre); gap(identity, 4);
@@ -202,22 +203,28 @@ public class CatalogActivity extends Activity {
         title.setMaxLines(3); title.setEllipsize(android.text.TextUtils.TruncateAt.END); identity.addView(title);
         if (!entry.author().isEmpty()) { gap(identity, 6); TextView author = text(entry.author(), 14, theme.muted()); author.setMaxLines(2); author.setEllipsize(android.text.TextUtils.TruncateAt.END); identity.addView(author); }
         heading.addView(identity, weight()); card.addView(heading);
-        if (!entry.description().isEmpty()) { gap(card, 14); TextView summary = text(entry.description(), 14, theme.muted()); summary.setMaxLines(3); summary.setEllipsize(android.text.TextUtils.TruncateAt.END); card.addView(summary); }
+        if (!entry.description().isEmpty()) { gap(card, 14); TextView summary = text(entry.description(), 14, theme.muted()); summary.setMaxLines(2); summary.setEllipsize(android.text.TextUtils.TruncateAt.END); card.addView(summary); }
         if (entry.book()) {
             gap(card, 14);
             List<String> facts = new ArrayList<>();
             if (!entry.format().isEmpty()) facts.add(entry.format().toUpperCase(Locale.ROOT));
             if (!entry.details().language().isEmpty()) facts.add(entry.details().language().toUpperCase(Locale.ROOT));
             if (!entry.details().size().isEmpty()) facts.add(entry.details().size());
-            if (!facts.isEmpty()) card.addView(text(String.join(" · ", facts), 12, theme.accent()));
-            if (entry.details().downloads() >= 0) { gap(card, 6); card.addView(text(downloadCount(entry), 12, theme.muted())); }
-            gap(card, 10); card.addView(text(tr("Подробнее →", "Book details →"), 13, theme.ink()));
+            if (entry.details().downloads() >= 0) facts.add(downloadCount(entry));
+            if (!facts.isEmpty()) card.addView(text(String.join(" · ", facts), 12, theme.muted()));
+            gap(card, 16);
+            boolean stacked = getResources().getConfiguration().fontScale >= 1.6f;
+            LinearLayout actions = stacked ? column() : row();
+            Button details = control(tr("Подробнее", "Details"), "book", false, () -> bookDetails(entry));
+            details.setContentDescription(tr("Подробнее: ", "Details: ") + entry.title());
+            actions.addView(details, stacked ? match() : weight());
             if (!entry.format().isEmpty()) {
-                gap(card, 12);
+                if (stacked) gap(actions, 8); else space(actions);
                 Button download = control(tr("Скачать", "Download"), "download", true, () -> download(entry));
                 download.setContentDescription(tr("Скачать: ", "Download: ") + entry.title());
-                card.addView(download, match());
+                actions.addView(download, stacked ? match() : weight());
             }
+            card.addView(actions, match());
         }
         card.setBackground(theme.feedback(shape(theme.surface(), 20), getResources().getDisplayMetrics().density));
         card.setOnClickListener(v -> {
@@ -440,7 +447,8 @@ public class CatalogActivity extends Activity {
                 ProgressBar progress = new ProgressBar(CatalogActivity.this, null, android.R.attr.progressBarStyleHorizontal);
                 progress.setProgressTintList(ColorStateList.valueOf(theme.accent())); progress.setIndeterminateTintList(ColorStateList.valueOf(theme.accent()));
                 progress.setTag("download-progress"); progress.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-                card.addView(progress, new LinearLayout.LayoutParams(-1, dp(5))); gap(card, 8);
+                if (!complete) { card.addView(progress, new LinearLayout.LayoutParams(-1, dp(5))); gap(card, 8); }
+                else { progress.setVisibility(View.GONE); card.addView(progress); }
                 TextView amount = text("", 12, theme.muted()); amount.setTag("download-amount"); card.addView(amount);
                 if (state.equals("error")) { gap(card, 8); card.addView(text(job.optString("error"), 13, theme.muted())); }
                 gap(card, 12); LinearLayout buttons = row();
@@ -458,7 +466,8 @@ public class CatalogActivity extends Activity {
         progress.setIndeterminate(active && job.optLong("total", -1) <= 0); progress.setMax(1000);
         progress.setProgress((int) Math.min(1000, job.optLong("done") * 1000 / Math.max(1, job.optLong("total"))));
         TextView amount = card.findViewWithTag("download-amount");
-        amount.setText(job.optString("format").toUpperCase(Locale.ROOT) + " · " + BookDownloads.size(job.optLong("done")) + " / " + BookDownloads.size(job.optLong("total", -1))
+        amount.setText(job.optString("format").toUpperCase(Locale.ROOT) + " · " + BookDownloads.size(job.optLong("done"))
+                + (job.optString("state").equals("complete") ? "" : " / " + BookDownloads.size(job.optLong("total", -1)))
                 + (active && job.optLong("rate") > 0 ? " · " + BookDownloads.size(job.optLong("rate")) + "/s" : ""));
     }
     private void command(String action, String id) { try { BookDownloadService.command(this, action, id); } catch (RuntimeException error) { error(error); } }
@@ -472,7 +481,13 @@ public class CatalogActivity extends Activity {
     private void empty(String title, String detail) {
         ScrollView scroll = new ScrollView(this); LinearLayout page = takeHeader(); LinearLayout panel = column(); panel.setPadding(dp(12), dp(28), dp(12), dp(20));
         ImageView icon = new ImageView(this); icon.setImageDrawable(new ReaderIcon(this, downloads ? "download" : "book", theme.accent())); panel.addView(icon, new LinearLayout.LayoutParams(dp(44), dp(44))); gap(panel, 18);
-        panel.addView(text(title, 22, theme.ink())); gap(panel, 10); panel.addView(text(detail, 15, theme.muted())); page.addView(panel); scroll.addView(page); content.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        TextView heading = text(title, 22, theme.ink()); heading.setTypeface(Typeface.DEFAULT_BOLD);
+        panel.addView(heading); gap(panel, 10); panel.addView(text(detail, 15, theme.muted()));
+        gap(panel, 20);
+        panel.addView(control(downloads ? tr("Открыть каталог", "Browse catalog") : tr("Разделы каталога", "Catalog sections"), "library", false, () -> {
+            if (downloads) switchTab(false); else { rememberQuery(); history.clear(); load(base(), false); }
+        }), match());
+        page.addView(panel); scroll.addView(page); content.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
     }
     private Button iconButton(String description, String icon, Runnable action) {
         Button button = control("", icon, false, action); button.setContentDescription(description); button.setTooltipText(description);

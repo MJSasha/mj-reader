@@ -531,7 +531,129 @@ public class ReaderSmokeTest extends Instrumentation {
         sendPointerSync(android.view.MotionEvent.obtain(time, time + 60, android.view.MotionEvent.ACTION_UP, point[0], point[1], 0));
         waitForIdleSync();
     }
+    private void libraryConvenienceCheck() throws Exception {
+        Context context = getTargetContext(); var prefs = context.getSharedPreferences("reader", 0);
+        String[] keys = {"opened.demo-en", "status.demo-en", "anchor.demo-en", "deleted.demo-en"};
+        var saved = new java.util.HashMap<String, Object>();
+        for (String key : keys) if (prefs.contains(key)) saved.put(key, prefs.getAll().get(key));
+        MainActivity activity = null;
+        try {
+            prefs.edit().putLong(keys[0], Long.MAX_VALUE).putString(keys[1], "reading").putInt(keys[2], 120).putBoolean(keys[3], false).commit();
+            activity = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            awaitField(activity, "librarySearch"); MainActivity screen = activity;
+            runOnMainSync(() -> {
+                View resume = screen.getWindow().getDecorView().findViewWithTag("continue-reading");
+                if (resume == null || !resume.getContentDescription().toString().contains("The Quiet Orbit")) throw new AssertionError("Missing most recent reading book");
+                ((EditText) field(screen, "librarySearch")).setText("no-matching-book-qa");
+                if (resume.isShown()) throw new AssertionError("Resume card obscures search results");
+                invoke(screen, "library"); // The same rebuild also runs when a Fold window changes size.
+                View rebuilt = screen.getWindow().getDecorView().findViewWithTag("continue-reading");
+                if (rebuilt == null || rebuilt.isShown()) throw new AssertionError("Search/resume state lost on window rebuild");
+            }); waitForIdleSync();
+            click(screen, "Clear search"); waitForIdleSync();
+            runOnMainSync(() -> {
+                View resume = screen.getWindow().getDecorView().findViewWithTag("continue-reading");
+                if (!resume.isShown()) throw new AssertionError("Resume card not restored after search");
+                resume.performClick();
+            });
+            awaitField(screen, "reading"); waitForIdleSync();
+            if (!((Books.Book) field(screen, "current")).id().equals("demo-en") || Math.abs((int) field(screen, "anchor") - 120) > 100)
+                throw new AssertionError("Resume did not restore the saved book/position");
+            runOnMainSync(() -> invoke(screen, "library")); waitForIdleSync();
+            click(screen, "Reading"); waitForIdleSync();
+            if (!field(screen, "filter").equals("reading")) throw new AssertionError("Quick reading filter failed");
+            runOnMainSync(() -> {
+                prefs.edit().putBoolean("deleted.demo-en", true).commit();
+                setField(screen, "filter", "all"); invoke(screen, "library");
+                View resume = screen.getWindow().getDecorView().findViewWithTag("continue-reading");
+                if (resume != null && resume.getContentDescription().toString().contains("The Quiet Orbit")) throw new AssertionError("Deleted book offered for resume");
+            });
+        } finally {
+            if (activity != null) { MainActivity closing = activity; runOnMainSync(closing::finish); }
+            var editor = prefs.edit();
+            for (String key : keys) {
+                Object value = saved.get(key);
+                if (value instanceof String text) editor.putString(key, text);
+                else if (value instanceof Long number) editor.putLong(key, number);
+                else if (value instanceof Integer number) editor.putInt(key, number);
+                else if (value instanceof Boolean flag) editor.putBoolean(key, flag);
+                else editor.remove(key);
+            }
+            editor.commit();
+        }
+    }
+    private void textSizePreviewCheck() throws Exception {
+        Context context = getTargetContext(); var prefs = context.getSharedPreferences("reader", 0);
+        String saved = prefs.getString("options", "{}");
+        Books.Book book = new Books(context).list().stream().filter(b -> b.id().equals("demo-en")).findFirst().orElseThrow();
+        try {
+            for (int scenario = 0; scenario < 4; scenario++) {
+                boolean pages = scenario < 2; int theme = scenario % 2 == 0 ? 0 : 2;
+                shell("wm size " + (scenario == 3 ? "740x360" : "430x932"));
+                shell("settings put system font_scale " + (scenario >= 2 ? "2.0" : "1.0"));
+                prefs.edit().putString("options", "{\"theme\":" + theme + ",\"size\":21,\"pages\":" + pages + "}").commit();
+                MainActivity screen = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                AlertDialog[] dialog = {null};
+                try {
+                    awaitField(screen, "librarySearch");
+                    runOnMainSync(() -> invoke(screen, "open", new Class[]{Books.Book.class, boolean.class}, book, false));
+                    awaitField(screen, "reading"); if (pages) awaitPages(screen); else awaitField(screen, "body"); waitForIdleSync();
+                    int anchor = (int) field(screen, "anchor");
+                    runOnMainSync(() -> dialog[0] = (AlertDialog) call(screen, "quickAppearance")); waitForIdleSync();
+                    runOnMainSync(() -> {
+                        TextView preview = dialog[0].getWindow().getDecorView().findViewWithTag("text-size-preview");
+                        SeekBar slider = findSeekBar(dialog[0].getWindow().getDecorView());
+                        if (preview == null || slider == null || preview.getText().length() == 0) throw new AssertionError("Missing live book excerpt");
+                        float before = preview.getTextSize();
+                        slider.setPressed(true); slider.setProgress(24); // A held drag previews 34 sp without reflowing the book.
+                        if (preview.getTextSize() <= before || ((ReaderOptions) field(screen, "options")).number("size", 0) != 21)
+                            throw new AssertionError("Drag preview is stale or reflows the book before release");
+                        slider.setPressed(false);
+                    }); waitForIdleSync();
+                    clickSystem("Increase Text size"); waitForIdleSync();
+                    if (((ReaderOptions) field(screen, "options")).number("size", 0) != 35) throw new AssertionError("Size not applied");
+                    runOnMainSync(() -> {
+                        View preview = dialog[0].getWindow().getDecorView().findViewWithTag("text-size-preview");
+                        View slider = findSeekBar(dialog[0].getWindow().getDecorView());
+                        for (View view : new View[]{preview, slider}) {
+                            android.graphics.Rect visible = new android.graphics.Rect();
+                            if (!view.getGlobalVisibleRect(visible) || visible.height() < view.getHeight()) throw new AssertionError("Text and slider must both be visible");
+                        }
+                        if (dialog[0].getWindow().getAttributes().dimAmount != 0) throw new AssertionError("Book darkened behind size panel");
+                    });
+                    capture("type-preview-" + scenario); clickSystem("Done");
+                    if ((int) field(screen, "anchor") != anchor) throw new AssertionError("Size preview moved reading position");
+                    runOnMainSync(() -> invoke(screen, "settings", new Class[]{boolean.class}, false)); waitForIdleSync();
+                    TextView[] preview = {null};
+                    runOnMainSync(() -> {
+                        if (find(screen.getWindow().getDecorView(), "Appearance").getLineCount() > 1) throw new AssertionError("Settings tab label wraps mid-word");
+                        preview[0] = screen.getWindow().getDecorView().findViewWithTag("text-size-preview");
+                        View panel = (View) preview[0].getParent();
+                        panel.requestRectangleOnScreen(new android.graphics.Rect(0, 0, panel.getWidth(), panel.getHeight()), true);
+                    }); waitForIdleSync();
+                    clickSystem("Decrease Text size"); waitForIdleSync();
+                    if (screen.getWindow().getDecorView().findViewWithTag("text-size-preview") != preview[0]) throw new AssertionError("Settings rebuilt while adjusting size");
+                    if (((ReaderOptions) field(screen, "options")).number("size", 0) != 34) throw new AssertionError("Settings size not saved");
+                    capture("type-settings-" + scenario);
+                } finally {
+                    runOnMainSync(() -> { if (dialog[0] != null) dialog[0].dismiss(); screen.finish(); });
+                }
+            }
+        } finally {
+            prefs.edit().putString("options", saved).commit();
+            shell("wm size 430x932"); shell("settings put system font_scale 1.0");
+        }
+    }
+    private SeekBar findSeekBar(View view) {
+        if (view instanceof SeekBar slider) return slider;
+        if (view instanceof ViewGroup group) for (int i = 0; i < group.getChildCount(); i++) {
+            SeekBar found = findSeekBar(group.getChildAt(i)); if (found != null) return found;
+        }
+        return null;
+    }
     private void visualCheck() throws Exception {
+        libraryConvenienceCheck();
+        textSizePreviewCheck();
         Context context = getTargetContext();
         android.content.SharedPreferences prefs = context.getSharedPreferences("reader", 0);
         prefs.edit().putBoolean("grid", true).putBoolean("favorite.demo-en", true).putBoolean("favorite.demo-ru", true).apply();
@@ -661,7 +783,7 @@ public class ReaderSmokeTest extends Instrumentation {
         MainActivity activity = null;
         try {
             prefs.edit().putString("options", "{\"theme\":0,\"size\":21,\"countdown\":false,\"pages\":true}").putBoolean("grid", true)
-                    .putString("status.showcase-ru", "reading").putInt("anchor.showcase-ru", ru.text().length() / 3).apply();
+                    .putLong("opened.showcase-ru", System.currentTimeMillis()).putString("status.showcase-ru", "reading").putInt("anchor.showcase-ru", ru.text().length() / 3).apply();
             activity = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             awaitField(activity, "librarySearch"); MainActivity screen = activity;
             runOnMainSync(() -> { setField(screen, "books", demo); setField(screen, "sort", 2); invoke(screen, "library"); });
@@ -1021,7 +1143,18 @@ public class ReaderSmokeTest extends Instrumentation {
     private void assertTouchTargets(View view) {
         if (view instanceof Button && view.isShown() && (view.getWidth() + 1 < 48 * view.getResources().getDisplayMetrics().density
                 || view.getHeight() + 1 < 48 * view.getResources().getDisplayMetrics().density)) throw new AssertionError("Small touch target: " + ((Button) view).getText());
-        if (view instanceof ViewGroup group) for (int i = 0; i < group.getChildCount(); i++) assertTouchTargets(group.getChildAt(i));
+        if (view instanceof ViewGroup group) for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i); assertTouchTargets(child);
+            if (!(child instanceof Button) || !child.isShown()) continue;
+            for (int j = i + 1; j < group.getChildCount(); j++) {
+                View other = group.getChildAt(j);
+                if (!(other instanceof Button) || !other.isShown()) continue;
+                int horizontal = Math.max(child.getLeft() - other.getRight(), other.getLeft() - child.getRight());
+                int vertical = Math.max(child.getTop() - other.getBottom(), other.getTop() - child.getBottom());
+                if (Math.max(horizontal, vertical) + 1 < 8 * view.getResources().getDisplayMetrics().density)
+                    throw new AssertionError("Adjacent actions lack spacing: " + ((Button) child).getText() + " / " + ((Button) other).getText());
+            }
+        }
     }
     private void setField(Object object, String name, Object value) {
         try {
@@ -1151,7 +1284,30 @@ public class ReaderSmokeTest extends Instrumentation {
         }
         return false;
     }
+    private void noteBoundariesCheck() throws Exception {
+        String[] layouts = {
+            "<h1>Notes</h1><a name='n1'/>First note.<a name='n2'/>Second note.",
+            "<div><h1>Notes</h1><span id='n1'>1</span><p>First note.</p><p>More detail.</p><span id='n2'>2</span><p>Second note.</p></div>",
+            "<p><sup><a id='n1'>1</a></sup> First note. <sup><a id='n2'>2</a></sup> Second note.</p>",
+            "<p><a xml:id='n1'>1</a></p><p>First note.</p><p>More detail.</p><p><a xml:id='n2'>2</a></p><p>Second note.</p>",
+            "<aside id='n1'><p>First note.</p><p>More detail.</p></aside><aside id='n2'><p>Second note.</p></aside>",
+            "<p id='n1'>First note.</p><p id='n2'>Second note.</p>"
+        };
+        for (String layout : layouts) {
+            byte[] document = ("<html xmlns='http://www.w3.org/1999/xhtml'><body>" + layout + "</body></html>").getBytes(StandardCharsets.UTF_8);
+            var links = android.text.Html.fromHtml("<p>Text <a href='notes.xhtml#n1'>[1]</a> then <a href='notes.xhtml#n2'>[2]</a>.</p>", 0);
+            var notes = new BookNotes(java.util.Map.of("notes.xhtml", document)).read(links, "chapter.xhtml", 0);
+            if (notes.size() != 2 || !notes.get(0).text().contains("First note.") || notes.get(0).text().contains("Second")
+                    || notes.get(0).text().contains("Notes") || !notes.get(1).text().contains("Second note.") || notes.get(1).text().contains("First"))
+                throw new AssertionError("Footnote boundary: " + layout + " -> " + notes);
+            if (notes.get(0).text().contains("1First")) throw new AssertionError("Note number merged with paragraph");
+            if (layout.contains("More detail.") && !notes.get(0).text().contains("\nMore detail.")) throw new AssertionError("Footnote paragraphs lost");
+            for (int i = 0; i < notes.size(); i++) if (!links.toString().substring(notes.get(i).start(), notes.get(i).end()).equals("[" + (i + 1) + "]"))
+                throw new AssertionError("Footnote range moved");
+        }
+    }
     private void openingAndNotesCheck(Books store) throws Exception {
+        noteBoundariesCheck();
         Context context = getTargetContext();
         var prefs = context.getSharedPreferences("reader", 0); String previous = prefs.getString("options", "{}");
         String fb2 = "<FictionBook xmlns='http://www.gribuser.ru/xml/fictionbook/2.0' xmlns:l='http://www.w3.org/1999/xlink'><description><title-info><book-title>Footnotes FB2</book-title></title-info></description>"
@@ -1160,12 +1316,17 @@ public class ReaderSmokeTest extends Instrumentation {
         Books.Book fiction = checkImport(store, "notes.fb2", fb2.getBytes(StandardCharsets.UTF_8), "[1]");
         if (fiction.notes().size() != 1 || !fiction.notes().get(0).text().contains("original lighthouse")
                 || !fiction.text().substring(fiction.notes().get(0).start(), fiction.notes().get(0).end()).equals("[1]")) throw new AssertionError("FB2 footnote offsets");
+        String inlineFb2 = fb2.replace("<section id='note-1'><title><p>1</p></title><p>The original lighthouse note.</p></section>",
+                "<a id='note-1'/><p>The original lighthouse note.</p><a id='note-2'/><p>Another note.</p>");
+        Books.Book inlineFiction = Fb2.read(inlineFb2.getBytes(StandardCharsets.UTF_8), "Inline notes");
+        if (inlineFiction.notes().size() != 1 || !inlineFiction.notes().get(0).text().equals("The original lighthouse note."))
+            throw new AssertionError("FB2 standalone anchor captured adjacent note");
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
             entry(zip, "META-INF/container.xml", "<container><rootfiles><rootfile full-path='book.opf'/></rootfiles></container>");
             entry(zip, "book.opf", "<package><metadata xmlns:dc='http://purl.org/dc/elements/1.1/'><dc:title>Footnotes EPUB</dc:title></metadata><manifest><item id='a' href='a.xhtml'/></manifest><spine><itemref idref='a'/></spine></package>");
             entry(zip, "a.xhtml", "<html xmlns='http://www.w3.org/1999/xhtml'><body><h1>The lighthouse</h1><p>Mira read <a href='notes.xhtml#n1'>[1]</a> before sunrise.</p><p>" + "A new day at the observatory. ".repeat(150) + "</p></body></html>");
-            entry(zip, "notes.xhtml", "<html xmlns='http://www.w3.org/1999/xhtml'><body><aside id='n1'><p>A star helps Mira find the shore.</p></aside></body></html>");
+            entry(zip, "notes.xhtml", "<html xmlns='http://www.w3.org/1999/xhtml'><body><h1>Notes</h1><a name='n1'/><p>A star helps Mira find the shore.</p><a name='n2'/><p>Another note must stay hidden.</p></body></html>");
         }
         Uri uri = createDocument("notes.epub", bytes.toByteArray());
         MainActivity screen = null;
@@ -1185,6 +1346,7 @@ public class ReaderSmokeTest extends Instrumentation {
             if (Math.abs(((android.text.TextPaint) field(pages, "paint")).getTextSize() / context.getResources().getDisplayMetrics().scaledDensity - 10) > .1)
                 throw new AssertionError("10 sp pagination font");
             Books.Note note = book.notes().get(0);
+            if (!note.text().equals("A star helps Mira find the shore.")) throw new AssertionError("Imported entire notes section: " + note.text());
             if (!book.text().substring(note.start(), note.end()).equals("[1]")) throw new AssertionError("EPUB footnote offsets");
             int count = store.list().size();
             for (int variant = 0; variant < 4; variant++) {
@@ -1236,10 +1398,15 @@ public class ReaderSmokeTest extends Instrumentation {
             clickSystem("Done");
             // Reimport restores links without replacing text or bookmarks.
             File file = new File(context.getFilesDir(), "books/" + book.id() + ".json");
-            JSONObject legacy = new JSONObject(new String(java.nio.file.Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8)); legacy.remove("notes");
-            java.nio.file.Files.write(file.toPath(), legacy.toString().getBytes(StandardCharsets.UTF_8));
-            Books.Book repaired = store.importBook(uri, book.id());
-            if (!repaired.id().equals(book.id()) || !repaired.text().equals(book.text()) || repaired.notes().size() != 1) throw new AssertionError("Note repair changed original text");
+            for (boolean missing : new boolean[]{false, true}) {
+                JSONObject legacy = new JSONObject(new String(java.nio.file.Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
+                if (missing) legacy.remove("notes");
+                else legacy.getJSONArray("notes").getJSONObject(0).put("text", "Notes: first note, second note, entire section");
+                java.nio.file.Files.write(file.toPath(), legacy.toString().getBytes(StandardCharsets.UTF_8));
+                Books.Book repaired = store.importBook(uri, book.id());
+                if (!repaired.id().equals(book.id()) || !repaired.text().equals(book.text()) || !repaired.notes().equals(book.notes()))
+                    throw new AssertionError("Note repair changed original text or retained old note");
+            }
             runOnMainSync(() -> invoke(active, "jump", new Class[]{int.class}, 400)); Thread.sleep(300); waitForIdleSync();
             int saved = (int) field(active, "anchor");
             runOnMainSync(() -> context.startActivity(new Intent(view).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)));
