@@ -42,7 +42,8 @@ you want to keep. There is no implicit device selection.
 
 Run a targeted subset with `--suites catalog,adaptive`. Reports are written under
 `dist/reports/android`: plain logs, JUnit XML and screenshots by suite. A missing `PASS:`
-marker is a failure even if `adb` exits zero. CI uploads those reports on failures too.
+marker is a failure even if `adb` exits zero. A failed suite also saves the last 4000
+Android log lines as `<suite>-logcat.txt` for assertion/crash diagnostics on the dedicated emulator. CI uploads those reports on failures too.
 
 ## Manual and optional checks
 

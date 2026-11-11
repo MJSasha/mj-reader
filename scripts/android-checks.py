@@ -51,6 +51,7 @@ def main():
             run('shell', 'settings', 'put', 'secure', 'show_ime_with_hard_keyboard', '1')
             run('shell', 'settings', 'put', 'global', 'animator_duration_scale', '1')
             run('shell', 'cmd', 'locale', 'set-app-locales', 'com.mjreader', '--locales', 'en-US')
+            run('logcat', '-c')
             command = ['shell', 'am', 'instrument', '-w']
             if suite != 'smoke':
                 command += ['-e', suite, 'true']
@@ -63,6 +64,11 @@ def main():
             failures += 1
             ET.SubElement(case, 'failure', message=str(error)).text = output or repr(error)
             print(f'FAIL: {suite}: {error}', flush=True)
+            try:
+                diagnostic = run('logcat', '-d', '-v', 'threadtime', '-t', '4000', check=False)
+                (args.reports / f'{suite}-logcat.txt').write_text(diagnostic.stdout + diagnostic.stderr)
+            except Exception as diagnostic_error:
+                print(f'Crash log collection: {diagnostic_error}', flush=True)
         finally:
             case.set('time', f'{time.monotonic() - started:.3f}')
             ET.SubElement(case, 'system-out').text = output
