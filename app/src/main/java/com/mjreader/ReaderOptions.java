@@ -51,6 +51,24 @@ final class ReaderOptions {
         states.addState(new int[]{}, normal);
         return states;
     }
+    android.graphics.drawable.Drawable toggleIcon(android.content.Context context, boolean checked) {
+        float density = context.getResources().getDisplayMetrics().density;
+        return new android.graphics.drawable.Drawable() {
+            final android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+            @Override public int getIntrinsicWidth() { return Math.round(44 * density); }
+            @Override public int getIntrinsicHeight() { return Math.round(28 * density); }
+            @Override public void draw(android.graphics.Canvas canvas) {
+                android.graphics.Rect b = getBounds();
+                paint.setColor(checked ? accent() : muted());
+                canvas.drawRoundRect(new android.graphics.RectF(b), 14 * density, 14 * density, paint);
+                paint.setColor(checked ? onAccent() : background());
+                canvas.drawCircle(checked ? b.right - 14 * density : b.left + 14 * density, b.centerY(), 10 * density, paint);
+            }
+            @Override public void setAlpha(int alpha) { paint.setAlpha(alpha); }
+            @Override public void setColorFilter(android.graphics.ColorFilter filter) { paint.setColorFilter(filter); }
+            @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
+        };
+    }
     int onAccent() { return light() ? 0xFFFFFFFF : 0xFF0C0E15; }
     // Small window changes do not always recreate an Activity. Ignore IME-only resizes.
     static void observeWindow(android.view.View root, Runnable resize) {

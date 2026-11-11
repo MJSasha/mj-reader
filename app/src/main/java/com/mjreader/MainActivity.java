@@ -280,7 +280,27 @@ public class MainActivity extends Activity {
             if (animate && isShown()) postInvalidateOnAnimation();
         }
     }
+    private void automaticUpdates() {
+        if (!AppUpdates.automaticDue(this, System.currentTimeMillis())) return;
+        Context context = getApplicationContext();
+        AppUpdates.WORKER.execute(() -> {
+            try {
+                AppUpdates.Release update = AppUpdates.check(context);
+                runOnUiThread(() -> {
+                    if (isDestroyed() || isFinishing() || current != null || settingsOpen || !hasWindowFocus() || update == null
+                            || !AppUpdates.prefs(this).getBoolean("automatic", true)
+                            || update.version().equals(AppUpdates.prefs(this).getString("announced", ""))) return;
+                    AppUpdates.prefs(this).edit().putString("announced", update.version()).apply();
+                    dialogs().setTitle(tr("Доступно обновление ", "Update available ") + update.version())
+                            .setMessage(tr("Посмотреть изменения и скачать новую версию MJReader?", "View changes and download the new MJReader version?"))
+                            .setNegativeButton(tr("Позже", "Later"), null)
+                            .setPositiveButton(tr("Подробнее", "View update"), (d, w) -> startActivity(new Intent(this, UpdateActivity.class))).show();
+                });
+            } catch (Exception ignored) { /* Offline reading never shows an update error. Manual checks can retry. */ }
+        });
+    }
     private void library() {
+        automaticUpdates();
         settingsOpen = false;
         pause();
         current = null;
@@ -1590,6 +1610,9 @@ public class MainActivity extends Activity {
                 }
             }
         }
+        LinearLayout updates = settingsGroup(page, tr("Приложение", "Application"));
+        updates.addView(button(tr("Обновления", "Updates") + " · " + AppUpdates.version(this), false,
+                () -> startActivity(new Intent(this, UpdateActivity.class))), matchWrap());
         int scrollY = settingsY;
         ScrollView scroll = settingsScroll;
         scroll.post(() -> scroll.scrollTo(0, scrollY));
@@ -1880,7 +1903,7 @@ public class MainActivity extends Activity {
         control.setContentDescription(title);
         control.setSelected(checked);
         control.setCompoundDrawablePadding(dp(16));
-        control.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, new ToggleIcon(checked), null);
+        control.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, options.toggleIcon(this, checked), null);
         control.setAccessibilityDelegate(new View.AccessibilityDelegate() {
             @Override public void onInitializeAccessibilityNodeInfo(View host, android.view.accessibility.AccessibilityNodeInfo info) {
                 super.onInitializeAccessibilityNodeInfo(host, info);
@@ -1892,28 +1915,11 @@ public class MainActivity extends Activity {
         control.setOnClickListener(view -> {
             boolean enabled = !control.isSelected();
             control.setSelected(enabled);
-            control.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, new ToggleIcon(enabled), null);
+            control.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, options.toggleIcon(this, enabled), null);
             change.accept(enabled);
         });
         parent.addView(control, matchWrap());
         gap(parent, 12);
-    }
-    private class ToggleIcon extends Drawable {
-        final boolean checked;
-        final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        ToggleIcon(boolean checked) { this.checked = checked; }
-        @Override public int getIntrinsicWidth() { return dp(44); }
-        @Override public int getIntrinsicHeight() { return dp(28); }
-        @Override public void draw(Canvas canvas) {
-            Rect b = getBounds();
-            paint.setColor(checked ? options.accent() : options.muted());
-            canvas.drawRoundRect(new RectF(b), dp(14), dp(14), paint);
-            paint.setColor(checked ? options.onAccent() : options.background());
-            canvas.drawCircle(checked ? b.right - dp(14) : b.left + dp(14), b.centerY(), dp(10), paint);
-        }
-        @Override public void setAlpha(int alpha) { paint.setAlpha(alpha); }
-        @Override public void setColorFilter(android.graphics.ColorFilter filter) { paint.setColorFilter(filter); }
-        @Override public int getOpacity() { return PixelFormat.TRANSLUCENT; }
     }
     private ReaderDialogs dialogs() {
         return new ReaderDialogs(this, options);

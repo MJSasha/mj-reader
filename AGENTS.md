@@ -36,6 +36,7 @@ Read this file first, then only the docs and classes relevant to the task.
 | Paragraph spans and bounded text windows | `ReaderText.java` |
 | OPDS search, mirror validation and retries | `Flibusta.java` |
 | Catalog paging and download UI | `CatalogActivity.java` |
+| App updates / GitHub releases | `AppUpdates.java`, `UpdateActivity.java` |
 | Persisted downloads and foreground transfers | `BookDownloads.java`, `BookDownloadService.java` |
 
 Java files live in `app/src/main/java/com/mjreader/`. Tests are under `checks/` and

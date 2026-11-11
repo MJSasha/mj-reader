@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 RUNNER = 'com.mjreader.test/com.mjreader.ReaderSmokeTest'
-SUITES = ('smoke', 'catalog', 'visual', 'adaptive')
+SUITES = ('smoke', 'catalog', 'visual', 'adaptive', 'updates')
 
 
 def passed(returncode, output):

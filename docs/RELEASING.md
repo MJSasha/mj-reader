@@ -78,3 +78,7 @@ python3 scripts/package-release.py
 Документация: [GitHub Secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets),
 [GitHub CLI Releases](https://cli.github.com/manual/gh_release_create),
 [Android app signing](https://developer.android.com/studio/publish/app-signing).
+
+## OTA updates
+
+The app discovers published entries through the releases list (not `/releases/latest`, which excludes prereleases). Keep tags `vX.Y.Z`, asset names `MJReader-X.Y.Z.apk`, application ID and signing identity stable, and increase the version code. The updater requires GitHub's asset `digest` (`sha256:`); an incomplete release or asset without it is skipped. Publication remains gated by the full CI checks. Existing installations predating OTA support need one manual APK update; subsequent updates can be downloaded from Settings → Updates and confirmed in Android's installer.

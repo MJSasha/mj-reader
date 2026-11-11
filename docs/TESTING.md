@@ -34,6 +34,7 @@ you want to keep. There is no implicit device selection.
 
 | Suite | Coverage | External requirements |
 | --- | --- | --- |
+| `updates` | Release/prerelease ordering, invalid URL/hash/size/draft rejection, APK identity/signature/version guards, daily checks, light/dark update UI, persisted DownloadManager completion/cancellation | Local fixtures only |
 | `smoke` | External VIEW/SEND open/duplicate handling, 10 sp pages, EPUB/FB2 footnotes and repair, Batch/invalid imports, targeted reimport menu/cancel/wrong-file rejection, TXT/FB2 encodings, FB2.ZIP/embedded assets/chapter offsets/repair/invalid XML, EPUB cover/navigation, duplicates/repair, metadata, collections, reversible deletion, search, bookmarks, RU/EN RSVP, persistence | None |
 | `catalog` | Local HTTPS OPDS, slow-mirror hedge/cancellation, truncated download retry, retries/failover, next pages, cover/chapter import, cancellation/retry, background download, zipped FB2 download/import, keyboard, themes, retained pages | Local test server only |
 | `visual` | Library/settings/dialogs, custom selectors, reachable actions, light/dark, settings restoration | None |
@@ -84,3 +85,7 @@ are intentionally excluded from Git.
 the test password `test-only`. It is not a signing credential. The test temporarily
 trusts that server in its own process, restores the previous factory and cleans up.
 Release packaging explicitly rejects `.p12`, signing files and EPUB files in the APK.
+
+## Optional installer check
+
+The `updates` instrumentation accepts `-e updateApk /data/local/tmp/mjreader-update-test.apk` for a locally generated APK with versionName `99.0.0`, a higher versionCode, package `com.mjreader`, `debuggable=false` and the same debug certificate as the installed debug app. This optional check validates an actual APK and opens the permission explanation (or Android installer when the dedicated emulator already permits it); it never confirms installation. Do not use a production library/device. Require the runner's `PASS:` marker. The portable `updates` suite does not need this file or GitHub access.

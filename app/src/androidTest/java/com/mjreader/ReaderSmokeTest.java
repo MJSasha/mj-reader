@@ -14,7 +14,8 @@ import android.view.accessibility.AccessibilityNodeInfo;
 import org.json.*;
 
 public class ReaderSmokeTest extends Instrumentation {
-    private boolean visualOnly, sampleOnly, readerOnly, benchmarkOnly, catalogOnly, liveCatalog, adaptiveOnly, showcaseOnly;
+    private String updateFixture;
+    private boolean updatesOnly, visualOnly, sampleOnly, readerOnly, benchmarkOnly, catalogOnly, liveCatalog, adaptiveOnly, showcaseOnly;
     @Override public void onCreate(Bundle arguments) {
         super.onCreate(arguments);
         showcaseOnly = arguments != null && arguments.getString("showcase", "false").equals("true");
@@ -25,12 +26,16 @@ public class ReaderSmokeTest extends Instrumentation {
         readerOnly = arguments != null && arguments.getString("reader", "false").equals("true");
         sampleOnly = arguments != null && arguments.getString("sample", "false").equals("true");
         visualOnly = arguments != null && arguments.getString("visual", "false").equals("true");
+        updateFixture = arguments == null ? null : arguments.getString("updateApk");
+        updatesOnly = arguments != null && arguments.getString("updates", "false").equals("true");
         start();
     }
     @Override public void onStart() {
         Bundle result = new Bundle();
         try {
             Context context = getTargetContext();
+            AppUpdates.prefs(context).edit().putBoolean("automatic", false).commit();
+            if (updatesOnly) { new UpdateCheck(this).run(updateFixture); result.putString("stream", "PASS: OTA release selection, checksum/signature/version rejection, daily check limit, themed UI and persisted download cancellation\n"); finish(Activity.RESULT_OK, result); return; }
             if (showcaseOnly) { showcase(); result.putString("stream", "PASS: original demonstration screenshots\n"); finish(Activity.RESULT_OK, result); return; }
             if (adaptiveOnly) { adaptiveCheck(); pagesCheck(); result.putString("stream", "PASS: phone/Fold/tablet resize, grid, reader position/fullscreen, EPUB illustration repair, exact page seams, one/two-page reflow, catalog retention, hover/focus and touch targets\n"); finish(Activity.RESULT_OK, result); return; }
             if (catalogOnly) { new CatalogCheck(this).run(liveCatalog); result.putString("stream", "PASS: OPDS failover, HTTPS EPUB download, cover/chapters import, cancellation/retry, background import, themed UI and recreation\n"); finish(Activity.RESULT_OK, result); return; }

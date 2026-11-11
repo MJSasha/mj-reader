@@ -20,6 +20,7 @@ Compose, a database library or a torrent runtime. It is a single `:app` Gradle m
 | `CatalogActivity` | Query, tabs, results, pagination, download status | No duplicate page loads; stale request generations ignored |
 | `Flibusta` | HTTPS, OPDS, known/custom mirrors, bounded retries | Atom/XML validation; no HTML scraping or browser execution |
 | `BookDownloads` | Atomic transfer records | One lock for record updates; SHA-256 URL identity |
+| `AppUpdates` / `UpdateActivity` | GitHub releases, APK validation, update UI | Android DownloadManager persists transfers; Package Installer requires user confirmation |
 | `BookDownloadService` | Serial background downloads and import | Foreground data-sync service; cancel closes the connection |
 
 ## Data flows
@@ -94,3 +95,9 @@ concrete requirement. Keep parser, presentation and transfer responsibilities in
 current owners; a UI cleanup should not rewrite storage or change the signing identity.
 
 Android VIEW/SEND content URIs use the existing background import queue; duplicates open the stored book ID. Pending URIs survive Activity recreation. Footnote taps take precedence over edge navigation, open the existing themed dialog, and never change the reader anchor. Screen readers expose footnotes as custom actions.
+
+## App updates
+
+`AppUpdates` reads a bounded (2 MB) public GitHub releases response on its worker, includes published 0.x prereleases and selects the highest newer numeric version with a complete APK asset. Only exact repository asset URLs with a SHA-256 digest and a declared size of at most 32 MB qualify. Automatic checks are throttled to once per day when entering the library, and can be disabled independently of book settings. Network failure does not interrupt reading.
+
+The user starts downloads from `UpdateActivity`. Android DownloadManager owns retries, background execution and transfer persistence. SharedPreferences `updates` stores cached release metadata and the active transfer ID/pending metadata. The APK is in app-specific external downloads; cancel/retry removes the tracked transfer. On completion and again before installation, the worker checks length, SHA-256, package `com.mjreader`, expected version name, an increased version code, a non-debuggable package and the exact installed signing certificate set. No new signing identity is accepted. An installer receives only a content URI with a temporary read grant. Unknown-source permission is requested through Android settings; returning never silently starts installation. Recreation rereads the persisted transfer and revalidates it.
