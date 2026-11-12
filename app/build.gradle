@@ -1,5 +1,5 @@
 plugins {
-    id 'com.android.application' version '8.13.2'
+    id 'com.android.application' version '9.5.1'
 }
 def releaseVersion = new Properties()
 rootProject.file('version.properties').withInputStream { releaseVersion.load(it) }
