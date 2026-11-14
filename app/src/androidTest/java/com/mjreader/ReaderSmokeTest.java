@@ -595,7 +595,7 @@ public class ReaderSmokeTest extends Instrumentation {
                 shell("wm size " + (scenario == 3 ? "740x360" : "430x932"));
                 shell("settings put system font_scale " + (scenario >= 2 ? "2.0" : "1.0"));
                 prefs.edit().putString("options", "{\"theme\":" + theme + ",\"size\":21,\"pages\":" + pages + "}").commit();
-                MainActivity screen = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                MainActivity screen = startStableMain(context);
                 AlertDialog[] dialog = {null};
                 try {
                     awaitField(screen, "librarySearch");
@@ -679,7 +679,7 @@ public class ReaderSmokeTest extends Instrumentation {
             for (int scenario = 0; scenario < 4; scenario++) {
                 shell("wm size " + (scenario == 2 ? "740x360" : scenario == 3 ? "320x747" : "360x840"));
                 shell("settings put system font_scale " + (scenario == 1 || scenario == 2 ? "2.0" : "1.0"));
-                MainActivity screen = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                MainActivity screen = startStableMain(context);
                 AlertDialog[] dialog = {null}; boolean[] action = {false}; int[] dismissed = {0};
                 int mode = scenario;
                 try {
@@ -1189,7 +1189,7 @@ public class ReaderSmokeTest extends Instrumentation {
             for (String size : new String[]{"430x932", "740x360"}) {
                 shell("wm size " + size); shell("settings put system font_scale 2.0"); shell("settings put global animator_duration_scale 0");
                 prefs.edit().putString("options", "{\"pages\":true,\"theme\":2,\"size\":21}").putInt("anchor." + book.id(), 0).commit();
-                screen = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                screen = startStableMain(context);
                 awaitField(screen, "librarySearch"); MainActivity large = screen;
                 runOnMainSync(() -> invoke(large, "open", new Class[]{Books.Book.class, boolean.class}, fixture, false));
                 pages = awaitPages(screen);
@@ -1262,6 +1262,25 @@ public class ReaderSmokeTest extends Instrumentation {
             if ((int) field(activity, "anchor") != anchor)
                 throw new AssertionError("Control animation moved the reading anchor");
         });
+    }
+    private MainActivity startStableMain(Context context) throws Exception {
+        MainActivity initial = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        MainActivity previous = null;
+        int stable = 0;
+        for (int i = 0; i < 200; i++) {
+            MainActivity[] current = {null};
+            runOnMainSync(() -> {
+                MainActivity candidate = (MainActivity) ((java.lang.ref.WeakReference<?>) field(initial, "active")).get();
+                if (candidate != null && !candidate.isDestroyed() && !candidate.isFinishing()
+                        && candidate.hasWindowFocus() && field(candidate, "librarySearch") != null)
+                    current[0] = candidate;
+            });
+            if (current[0] != null && current[0] == previous) {
+                if (++stable >= 5) return current[0];
+            } else { previous = current[0]; stable = 0; }
+            Thread.sleep(50);
+        }
+        throw new AssertionError("MainActivity did not settle after display/font configuration change");
     }
     private void awaitControlsMotion(MainActivity activity) throws Exception {
         waitForIdleSync();
