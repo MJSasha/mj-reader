@@ -51,7 +51,7 @@ final class AppUpdates {
         for (int i = 0; i < releases.length(); i++) try {
             JSONObject item = releases.getJSONObject(i);
             String tag = item.optString("tag_name"), version = tag.startsWith("v") ? tag.substring(1) : "";
-            // 0.x releases are intentionally marked prerelease; include them, but never drafts.
+            // Include older prereleases as well as full releases, but never drafts.
             if (item.optBoolean("draft") || !validVersion(version) || compare(version, current) <= 0
                     || best != null && compare(version, best.version()) <= 0) continue;
             JSONArray assets = item.getJSONArray("assets");

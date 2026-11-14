@@ -69,9 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/release-notes.py "$RELEASE_VERSION" > dist/release/NOTES.md
-          flags=()
-          if [[ "$RELEASE_VERSION" == 0.* ]]; then flags+=(--prerelease); fi
           gh release create "$RELEASE_TAG" \
             "dist/release/MJReader-$RELEASE_VERSION.apk" dist/release/SHA256SUMS \
             --verify-tag --title "MJReader $RELEASE_VERSION" \
-            --notes-file dist/release/NOTES.md "${flags[@]}"
+            --notes-file dist/release/NOTES.md --latest

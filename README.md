@@ -2,13 +2,13 @@
 
 <p align="center">
   <a href="https://github.com/MJSasha/mj-reader/actions/workflows/ci.yml"><img src="https://github.com/MJSasha/mj-reader/actions/workflows/ci.yml/badge.svg" alt="Checks"></a>
-  <a href="https://github.com/MJSasha/mj-reader/releases"><img src="https://img.shields.io/github/v/release/MJSasha/mj-reader?include_prereleases&amp;label=APK&amp;color=c7ff68" alt="Latest APK"></a>
+  <a href="https://github.com/MJSasha/mj-reader/releases/latest"><img src="https://img.shields.io/github/v/release/MJSasha/mj-reader?label=APK&amp;color=c7ff68" alt="Latest APK"></a>
   <img src="https://img.shields.io/badge/Android-8.0%2B-c7ff68?logo=android&amp;logoColor=c7ff68" alt="Android 8.0+">
   <img src="https://img.shields.io/badge/Java-17-8bd9ff" alt="Java 17">
 </p>
 
 <p align="center">
-  <a href="https://github.com/MJSasha/mj-reader/releases"><b>Скачать APK</b></a> ·
+  <a href="https://github.com/MJSasha/mj-reader/releases/latest"><b>Скачать APK</b></a> ·
   <a href="#возможности">Возможности</a> ·
   <a href="#сборка">Сборка</a> ·
   <a href="docs/TESTING.md">Тестирование</a> ·
@@ -98,12 +98,12 @@ Built with Java and Android Views, without runtime third-party dependencies.*
 
 ## Установка
 
-1. Откройте [Releases](https://github.com/MJSasha/mj-reader/releases) и выберите нужную версию.
+1. Откройте [последний релиз](https://github.com/MJSasha/mj-reader/releases/latest).
 2. В **Assets** скачайте `MJReader-X.Y.Z.apk`.
 3. Откройте APK на устройстве с Android 8.0 или новее. При необходимости разрешите установку из выбранного приложения.
 4. Новые версии устанавливайте **поверх** старой: сертификат сохраняется, библиотека остаётся на месте.
 
-Версии 0.x — предварительные. `SHA256SUMS` в релизе содержит контрольную сумму APK.
+Версии 0.x активно развиваются. `SHA256SUMS` в релизе содержит контрольную сумму APK.
 Удаление самого приложения удаляет его приватную библиотеку и настройки.
 
 ## Форматы, данные и ограничения
