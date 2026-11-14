@@ -37,8 +37,7 @@ public class MainActivity extends Activity {
     private ReadingText reading;
     private ReaderOptions options;
     private LinearLayout root, header, footer;
-    private android.transition.Transition controlsTransition;
-    private boolean controlsFramePending;
+    private android.animation.ValueAnimator controlsAnimation;
     private ListView libraryList;
     private BookAdapter adapter;
     private EditText librarySearch;
@@ -226,9 +225,7 @@ public class MainActivity extends Activity {
         if (notePopup != null) notePopup.dismiss();
         renderVersion++;
         if (root != null) {
-            android.transition.TransitionManager.endTransitions(root);
-            controlsTransition = null;
-            controlsFramePending = false;
+            cancelControlsAnimation();
             root.animate().cancel();
         }
         getWindow().setBackgroundDrawable(new ColorDrawable(options.background()));
@@ -247,13 +244,18 @@ public class MainActivity extends Activity {
             int width = getResources().getConfiguration().screenWidthDp;
             int limit = settingsOpen || (current != null && (focus || !options.flag("pages", false))) ? 700 : 1200;
             int gutter = Math.max(width >= 600 ? 24 : 16, (width - limit) / 2);
-            view.setPadding(dp(gutter) + insets.getSystemWindowInsetLeft(), dp(8) + insets.getSystemWindowInsetTop(),
-                    dp(gutter) + insets.getSystemWindowInsetRight(), dp(8) + insets.getSystemWindowInsetBottom());
+            boolean reader = current != null && !settingsOpen;
+            view.setPadding(dp(gutter) + (reader ? insets.getStableInsetLeft() : insets.getSystemWindowInsetLeft()),
+                    dp(8) + (reader ? insets.getStableInsetTop() : insets.getSystemWindowInsetTop()),
+                    dp(gutter) + (reader ? insets.getStableInsetRight() : insets.getSystemWindowInsetRight()),
+                    dp(8) + (reader ? insets.getStableInsetBottom() : insets.getSystemWindowInsetBottom()));
             return insets;
         });
         setContentView(root);
         int flags = options.light() ? View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR : 0;
         if (Build.VERSION.SDK_INT >= 27 && options.light()) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        if (current != null && !settingsOpen) flags |= View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
         getWindow().getDecorView().setSystemUiVisibility(flags);
         root.requestApplyInsets();
         applyWindow();
@@ -933,7 +935,22 @@ public class MainActivity extends Activity {
         gap(header, 8);
         chapterLabel.setText(current.chapters().get(chapterIndex()).title());
         root.addView(header);
-        if (focus) focusScreen(); else textScreen();
+        if (focus) focusScreen(); else {
+            textScreen();
+            // The book keeps one viewport. Controls overlay it instead of changing pagination.
+            View content = pageReader != null ? pageReader : textScroll;
+            root.removeView(header); root.removeView(content); root.removeView(footer);
+            FrameLayout stage = new FrameLayout(this);
+            stage.addView(content, new FrameLayout.LayoutParams(-1, -1));
+            header.setBackgroundColor(options.background());
+            for (View panel : new View[]{header, footer}) {
+                panel.setClickable(true);
+                panel.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            }
+            stage.addView(header, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
+            stage.addView(footer, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
+            root.addView(stage, new LinearLayout.LayoutParams(-1, 0, 1));
+        }
         setFullscreen(fullscreen);
     }
     // LineBreaker constants are inlined; the TextView setters exist since API 26.
@@ -1325,73 +1342,52 @@ public class MainActivity extends Activity {
         counter.setContentDescription(counter.getText() + ". " + tr("Навигация", "Navigation"));
         if (chapterLabel != null) chapterLabel.setText(current.chapters().get(chapter).title());
     }
+    private void cancelControlsAnimation() {
+        if (controlsAnimation == null) return;
+        controlsAnimation.removeAllListeners();
+        controlsAnimation.cancel();
+        controlsAnimation = null;
+    }
+    private void setControlsAlpha(float alpha) {
+        header.setAlpha(alpha);
+        if (footer != null) footer.setAlpha(alpha);
+    }
     private void setFullscreen(boolean enabled) {
         boolean changed = fullscreen != enabled;
         fullscreen = enabled;
         if (header == null || current == null) return;
-        android.transition.TransitionManager.endTransitions(root);
-        controlsTransition = null;
-        if (changed && !controlsFramePending && root.isLaidOut() && android.animation.ValueAnimator.areAnimatorsEnabled()) {
-            // Only the controls move. Text reflows once and retains its full-text anchor.
-            android.transition.TransitionSet movement = new android.transition.TransitionSet();
-            movement.addTransition(controlPanelTransition(header, -1));
-            if (footer != null) movement.addTransition(controlPanelTransition(footer, 1));
-            movement.setDuration(180);
-            movement.setInterpolator(new android.view.animation.DecelerateInterpolator());
-            movement.addListener(new android.transition.TransitionListenerAdapter() {
-                @Override public void onTransitionEnd(android.transition.Transition transition) {
-                    if (controlsTransition == movement) controlsTransition = null;
+        cancelControlsAnimation();
+        float from = header.getAlpha(), to = enabled ? 0f : 1f;
+        int accessibility = enabled ? View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS : View.IMPORTANT_FOR_ACCESSIBILITY_NO;
+        header.setImportantForAccessibility(accessibility);
+        if (footer != null) footer.setImportantForAccessibility(accessibility);
+        if (changed && root.isLaidOut() && from != to && android.animation.ValueAnimator.areAnimatorsEnabled()) {
+            header.setVisibility(View.VISIBLE);
+            if (footer != null) footer.setVisibility(View.VISIBLE);
+            android.animation.ValueAnimator animation = android.animation.ValueAnimator.ofFloat(from, to);
+            controlsAnimation = animation;
+            animation.setDuration(Math.max(1, Math.round(200 * Math.abs(to - from))));
+            animation.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
+            animation.addUpdateListener(frame -> setControlsAlpha((float) frame.getAnimatedValue()));
+            animation.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(android.animation.Animator animator) {
+                    if (controlsAnimation != animation) return;
+                    controlsAnimation = null;
+                    header.setVisibility(fullscreen ? View.INVISIBLE : View.VISIBLE);
+                    if (footer != null) footer.setVisibility(fullscreen ? View.INVISIBLE : View.VISIBLE);
                 }
             });
-            controlsTransition = movement;
-            android.transition.TransitionManager.beginDelayedTransition(root, movement);
-            // Native delayed transitions cannot be restarted safely before their first draw.
-            // Further toggles in this frame settle immediately to the latest visibility.
-            controlsFramePending = true;
-            ViewGroup scene = root;
-            int version = renderVersion;
-            scene.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
-                @Override public boolean onPreDraw() {
-                    scene.getViewTreeObserver().removeOnPreDrawListener(this);
-                    if (version == renderVersion) controlsFramePending = false;
-                    return true;
-                }
-            });
+            animation.start();
+        } else {
+            setControlsAlpha(to);
+            header.setVisibility(enabled ? View.INVISIBLE : View.VISIBLE);
+            if (footer != null) footer.setVisibility(enabled ? View.INVISIBLE : View.VISIBLE);
         }
-        header.setVisibility(enabled ? View.GONE : View.VISIBLE);
-        if (footer != null) footer.setVisibility(enabled ? View.GONE : View.VISIBLE);
-        int flags = options.light() ? View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR : 0;
+        int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
+        if (options.light()) flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
         if (Build.VERSION.SDK_INT >= 27 && options.light()) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
         if (enabled) flags |= View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
         getWindow().getDecorView().setSystemUiVisibility(flags);
-        if (!focus && textScroll != null) restoreAfterLayout();
-    }
-    private android.transition.Transition controlPanelTransition(View target, int direction) {
-        // A full-root Slide moves a small panel offscreen almost instantly; use 16 dp.
-        android.transition.Visibility transition = new android.transition.Visibility() {
-            private android.animation.Animator motion(View view, boolean entering) {
-                float shift = dp(16) * direction;
-                android.animation.AnimatorSet animation = new android.animation.AnimatorSet();
-                animation.playTogether(
-                        android.animation.ObjectAnimator.ofFloat(view, View.TRANSLATION_Y, entering ? shift : 0, entering ? 0 : shift),
-                        android.animation.ObjectAnimator.ofFloat(view, View.ALPHA, entering ? 0 : 1, entering ? 1 : 0));
-                animation.addListener(new android.animation.AnimatorListenerAdapter() {
-                    @Override public void onAnimationEnd(android.animation.Animator animator) {
-                        view.setTranslationY(0); view.setAlpha(1);
-                    }
-                });
-                return animation;
-            }
-            @Override public android.animation.Animator onAppear(ViewGroup scene, View view,
-                    android.transition.TransitionValues start, android.transition.TransitionValues end) {
-                return motion(view, true);
-            }
-            @Override public android.animation.Animator onDisappear(ViewGroup scene, View view,
-                    android.transition.TransitionValues start, android.transition.TransitionValues end) {
-                return motion(view, false);
-            }
-        };
-        return transition.addTarget(target);
     }
     private void readerMenu() {
         pause();

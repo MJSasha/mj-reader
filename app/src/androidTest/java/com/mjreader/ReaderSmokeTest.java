@@ -1201,10 +1201,10 @@ public class ReaderSmokeTest extends Instrumentation {
                 runOnMainSync(() -> {
                     int anchor = (int) field(large, "anchor");
                     invoke(large, "setFullscreen", new Class[]{boolean.class}, true);
-                    if (field(large, "controlsTransition") != null)
+                    if (field(large, "controlsAnimation") != null)
                         throw new AssertionError("Controls ignore reduced motion");
                     invoke(large, "setFullscreen", new Class[]{boolean.class}, false);
-                    if (field(large, "controlsTransition") != null || (int) field(large, "anchor") != anchor)
+                    if (field(large, "controlsAnimation") != null || (int) field(large, "anchor") != anchor)
                         throw new AssertionError("Reduced-motion controls changed position");
                 });
                 pages = awaitPages(large);
@@ -1240,22 +1240,40 @@ public class ReaderSmokeTest extends Instrumentation {
     }
     private void checkControlsMotion(MainActivity activity) throws Exception {
         int anchor = (int) field(activity, "anchor");
+        int[] viewport = readingViewport(activity);
         runOnMainSync(() -> {
             invoke(activity, "setFullscreen", new Class[]{boolean.class}, true);
-            if (field(activity, "controlsTransition") == null)
+            if (field(activity, "controlsAnimation") == null)
                 throw new AssertionError("Center toggle should animate controls");
+            android.animation.ValueAnimator animation = (android.animation.ValueAnimator) field(activity, "controlsAnimation");
+            animation.pause(); animation.setCurrentFraction(.5f);
+            float alpha = ((View) field(activity, "header")).getAlpha();
+            if (alpha <= 0f || alpha >= 1f) throw new AssertionError("Controls have no intermediate fade frame");
         });
+        waitForIdleSync();
+        if (!java.util.Arrays.equals(viewport, readingViewport(activity)))
+            throw new AssertionError("Reader viewport moved during the control fade");
+        runOnMainSync(() -> ((android.animation.ValueAnimator) field(activity, "controlsAnimation")).resume());
         awaitControlsMotion(activity);
+        if (!java.util.Arrays.equals(viewport, readingViewport(activity)))
+            throw new AssertionError("Reader viewport changed after hiding controls");
         runOnMainSync(() -> {
-            if (((View) field(activity, "header")).getVisibility() != View.GONE
-                    || ((View) field(activity, "footer")).getVisibility() != View.GONE)
-                throw new AssertionError("Hidden controls still occupy reading space");
-            // Reverse immediately twice, including before the next rendered frame.
+            if (((View) field(activity, "header")).getVisibility() != View.INVISIBLE
+                    || ((View) field(activity, "footer")).getVisibility() != View.INVISIBLE)
+                throw new AssertionError("Hidden overlay controls are still visible");
+            // Reverse from an actual intermediate alpha, without snapping to either endpoint.
             invoke(activity, "setFullscreen", new Class[]{boolean.class}, false);
+            android.animation.ValueAnimator entering = (android.animation.ValueAnimator) field(activity, "controlsAnimation");
+            entering.pause(); entering.setCurrentFraction(.5f);
+            float alpha = ((View) field(activity, "header")).getAlpha();
             invoke(activity, "setFullscreen", new Class[]{boolean.class}, true);
+            if (((View) field(activity, "header")).getAlpha() != alpha)
+                throw new AssertionError("Interrupted fade snapped opacity");
             invoke(activity, "setFullscreen", new Class[]{boolean.class}, false);
         });
         awaitControlsMotion(activity);
+        if (!java.util.Arrays.equals(viewport, readingViewport(activity)))
+            throw new AssertionError("Reader viewport or page seam changed after showing controls");
         runOnMainSync(() -> {
             for (String name : new String[]{"header", "footer"}) {
                 View panel = (View) field(activity, name);
@@ -1265,6 +1283,18 @@ public class ReaderSmokeTest extends Instrumentation {
             if ((int) field(activity, "anchor") != anchor)
                 throw new AssertionError("Control animation moved the reading anchor");
         });
+    }
+    private int[] readingViewport(MainActivity activity) {
+        int[] bounds = new int[5];
+        runOnMainSync(() -> {
+            ReaderPages pages = (ReaderPages) field(activity, "pageReader");
+            ScrollView scroll = (ScrollView) field(activity, "textScroll");
+            View view = pages != null ? pages : scroll;
+            view.getLocationOnScreen(bounds);
+            bounds[2] = view.getWidth(); bounds[3] = view.getHeight();
+            bounds[4] = pages != null ? pages.end() : scroll.getScrollY();
+        });
+        return bounds;
     }
     private MainActivity startStableMain(Context context) throws Exception {
         MainActivity initial = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -1289,7 +1319,7 @@ public class ReaderSmokeTest extends Instrumentation {
         waitForIdleSync();
         for (int i = 0; i < 100; i++) {
             boolean[] done = {false};
-            runOnMainSync(() -> done[0] = field(activity, "controlsTransition") == null);
+            runOnMainSync(() -> done[0] = field(activity, "controlsAnimation") == null);
             if (done[0]) { waitForIdleSync(); return; }
             Thread.sleep(20);
         }
@@ -1666,6 +1696,9 @@ public class ReaderSmokeTest extends Instrumentation {
                 boolean paged = variant % 2 == 0; int theme = variant / 2 * 2;
                 runOnMainSync(() -> { ((ReaderOptions) field(active, "options")).put("theme", theme); ((ReaderOptions) field(active, "options")).put("pages", paged); invoke(active, "changedOptions"); });
                 if (paged) awaitPages(screen); else { awaitField(screen, "body"); Thread.sleep(250); waitForIdleSync(); }
+                // Overlay controls can cover the first line; hide them as a reader would.
+                if (!(boolean) field(screen, "fullscreen")) tapReading(screen, .5f);
+                awaitControlsMotion(screen);
                 int anchor = (int) field(screen, "anchor");
                 float[] point = new float[2];
                 runOnMainSync(() -> {
@@ -1701,7 +1734,7 @@ public class ReaderSmokeTest extends Instrumentation {
                     if (!focused) Thread.sleep(50);
                 }
                 if (!focused) throw new AssertionError("Reader did not regain focus after closing the note");
-                if ((int) field(screen, "anchor") != anchor || (boolean) field(screen, "fullscreen")) throw new AssertionError("Note changed reading position/panels");
+                if ((int) field(screen, "anchor") != anchor || !(boolean) field(screen, "fullscreen")) throw new AssertionError("Note changed reading position/panels");
             }
             runOnMainSync(() -> {
                 ((ReaderOptions) field(active, "options")).put("size", 12); invoke(active, "changedOptions");

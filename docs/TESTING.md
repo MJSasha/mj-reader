@@ -46,7 +46,7 @@ you want to keep. There is no implicit device selection.
 
 | Suite | Coverage | External requirements |
 | --- | --- | --- |
-| `motion` | Focused generated-EPUB reader regression: bounded illustrations, phone/spread reflow, header/footer motion, same-frame reversals, scroll/page anchors, page slides and edge taps, light/dark, large fonts, short windows and reduced motion | None |
+| `motion` | Focused generated-EPUB reader regression: bounded illustrations, phone/spread reflow, overlay control opacity, unchanged viewport/page seams/scroll offset at intermediate and final frames, continuous reversals, scroll/page anchors, page slides and edge taps, light/dark, large fonts, short windows and reduced motion | None |
 | `updates` | Release/prerelease ordering, invalid URL/hash/size/draft rejection, APK identity/signature/version guards, daily checks, light/dark update UI, persisted DownloadManager completion/cancellation | Local fixtures only |
 | `smoke` | External VIEW/SEND open/duplicate handling, 10 sp pages and off-marker note taps, nearest-note hit targets, EPUB/FB2 footnotes, standalone/nested/named/XML anchors, adjacent-note boundaries, paragraph preservation and repair, Batch/invalid imports, targeted reimport menu/cancel/wrong-file rejection, TXT/FB2 encodings, FB2.ZIP/embedded assets/chapter offsets/repair/invalid XML, EPUB cover/navigation, duplicates/repair, metadata, collections, reversible deletion, search, bookmarks, RU/EN RSVP, persistence | None |
 | `catalog` | Local HTTPS OPDS, slow-mirror hedge/cancellation, truncated download retry, retries/failover, next pages, cover/chapter import, cancellation/retry, background download, zipped FB2 download/import, keyboard, themes, retained pages | Local test server only |
