@@ -38,6 +38,7 @@ public class MainActivity extends Activity {
     private ReaderOptions options;
     private LinearLayout root, header, footer;
     private android.transition.Transition controlsTransition;
+    private boolean controlsFramePending;
     private ListView libraryList;
     private BookAdapter adapter;
     private EditText librarySearch;
@@ -227,6 +228,7 @@ public class MainActivity extends Activity {
         if (root != null) {
             android.transition.TransitionManager.endTransitions(root);
             controlsTransition = null;
+            controlsFramePending = false;
             root.animate().cancel();
         }
         getWindow().setBackgroundDrawable(new ColorDrawable(options.background()));
@@ -1329,7 +1331,7 @@ public class MainActivity extends Activity {
         if (header == null || current == null) return;
         android.transition.TransitionManager.endTransitions(root);
         controlsTransition = null;
-        if (changed && root.isLaidOut() && android.animation.ValueAnimator.areAnimatorsEnabled()) {
+        if (changed && !controlsFramePending && root.isLaidOut() && android.animation.ValueAnimator.areAnimatorsEnabled()) {
             // Only the controls move. Text reflows once and retains its full-text anchor.
             android.transition.TransitionSet movement = new android.transition.TransitionSet();
             movement.addTransition(controlPanelTransition(header, -1));
@@ -1343,6 +1345,18 @@ public class MainActivity extends Activity {
             });
             controlsTransition = movement;
             android.transition.TransitionManager.beginDelayedTransition(root, movement);
+            // Native delayed transitions cannot be restarted safely before their first draw.
+            // Further toggles in this frame settle immediately to the latest visibility.
+            controlsFramePending = true;
+            ViewGroup scene = root;
+            int version = renderVersion;
+            scene.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
+                @Override public boolean onPreDraw() {
+                    scene.getViewTreeObserver().removeOnPreDrawListener(this);
+                    if (version == renderVersion) controlsFramePending = false;
+                    return true;
+                }
+            });
         }
         header.setVisibility(enabled ? View.GONE : View.VISIBLE);
         if (footer != null) footer.setVisibility(enabled ? View.GONE : View.VISIBLE);
