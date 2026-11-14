@@ -106,7 +106,7 @@ public class ReaderSmokeTest extends Instrumentation {
                 throw new AssertionError("Cover blocked chapter repair");
             android.content.SharedPreferences prefs = context.getSharedPreferences("reader", 0);
             prefs.edit().putBoolean("grid", true).remove("favorite.demo-en").remove("options.demo-en").remove("options.demo-ru").putInt("anchor.demo-en", 0).putInt("anchor.demo-ru", 0).putString("options", "{\"countdown\":false}").apply();
-            MainActivity activity = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            MainActivity activity = startStableMain(context);
             waitForIdleSync();
             awaitField(activity, "librarySearch");
             // Reimport is an action on this book, not a second unrestricted Add book flow.
@@ -256,7 +256,7 @@ public class ReaderSmokeTest extends Instrumentation {
             int ruAnchor = (int) field(activity, "anchor");
             runOnMainSync(activity::finish);
             waitForIdleSync();
-            MainActivity reopened = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            MainActivity reopened = startStableMain(context);
             awaitField(reopened, "librarySearch");
             runOnMainSync(() -> ((EditText) field(reopened, "librarySearch")).setText("Станция"));
             runOnMainSync(() -> ((ListView) field(reopened, "libraryList")).setSelection(1));
@@ -352,7 +352,7 @@ public class ReaderSmokeTest extends Instrumentation {
             try { checkImport(store, "sample-duplicate.epub", bytes, "Сияние"); throw new AssertionError("Duplicate accepted"); }
             catch (Books.DuplicateBook expected) {}
         } finally { java.nio.file.Files.write(saved.toPath(), original); }
-        MainActivity activity = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        MainActivity activity = startStableMain(context);
         awaitField(activity, "librarySearch");
         runOnMainSync(() -> ((EditText) field(activity, "librarySearch")).setText("Сияние"));
         runOnMainSync(() -> ((ListView) field(activity, "libraryList")).setSelection(1));
@@ -371,7 +371,7 @@ public class ReaderSmokeTest extends Instrumentation {
     }
     private void benchmarkCheck(Bundle result) throws Exception {
         Context context = getTargetContext();
-        MainActivity activity = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        MainActivity activity = startStableMain(context);
         awaitField(activity, "librarySearch");
         runOnMainSync(() -> ((EditText) field(activity, "librarySearch")).setText("Сияние"));
         runOnMainSync(() -> ((ListView) field(activity, "libraryList")).setSelection(1));
@@ -387,7 +387,7 @@ public class ReaderSmokeTest extends Instrumentation {
     }
     private void readerCheck() throws Exception {
         Context context = getTargetContext();
-        MainActivity activity = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        MainActivity activity = startStableMain(context);
         awaitField(activity, "librarySearch");
         runOnMainSync(() -> ((EditText) field(activity, "librarySearch")).setText("Сияние"));
         runOnMainSync(() -> ((ListView) field(activity, "libraryList")).setSelection(1));
@@ -732,7 +732,7 @@ public class ReaderSmokeTest extends Instrumentation {
         Context context = getTargetContext();
         android.content.SharedPreferences prefs = context.getSharedPreferences("reader", 0);
         prefs.edit().putBoolean("grid", true).putBoolean("favorite.demo-en", true).putBoolean("favorite.demo-ru", true).apply();
-        MainActivity activity = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        MainActivity activity = startStableMain(context);
         awaitField(activity, "librarySearch");
         for (int theme : new int[]{0, 2}) {
             runOnMainSync(() -> {
@@ -803,7 +803,7 @@ public class ReaderSmokeTest extends Instrumentation {
                 shell("settings put system font_scale " + (scenario >= 2 ? "2.0" : "1.0"));
                 shell("settings put global animator_duration_scale " + (scenario >= 2 ? "0" : "1"));
                 prefs.edit().putString("options", "{\"theme\":" + theme + "}").commit();
-                MainActivity library = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                MainActivity library = startStableMain(context);
                 try {
                     awaitField(library, "librarySearch"); waitForIdleSync();
                     assertChrome(library, (ListView) field(library, "libraryList"));
@@ -859,7 +859,7 @@ public class ReaderSmokeTest extends Instrumentation {
         try {
             prefs.edit().putString("options", "{\"theme\":0,\"size\":21,\"countdown\":false,\"pages\":true}").putBoolean("grid", true)
                     .putLong("opened.showcase-ru", System.currentTimeMillis()).putString("status.showcase-ru", "reading").putInt("anchor.showcase-ru", ru.text().length() / 3).apply();
-            activity = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            activity = startStableMain(context);
             awaitField(activity, "librarySearch"); MainActivity screen = activity;
             runOnMainSync(() -> { setField(screen, "books", demo); setField(screen, "sort", 2); invoke(screen, "library"); });
             waitForIdleSync(); capture("showcase-library-dark");
@@ -896,7 +896,7 @@ public class ReaderSmokeTest extends Instrumentation {
                 shell("settings put system font_scale " + (large ? "2.0" : "1.0"));
                 shell("cmd locale set-app-locales com.mjreader --locales " + (scenario == 1 ? "en-US" : "ru"));
                 prefs.edit().putString("options", "{\"theme\":" + (scenario == 1 || scenario == 2 ? 2 : 0) + ",\"pages\":true}").commit();
-                MainActivity screen = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                MainActivity screen = startStableMain(context);
                 try {
                     awaitField(screen, "librarySearch"); waitForIdleSync();
                     assertChrome(screen, (ListView) field(screen, "libraryList"));
@@ -985,7 +985,7 @@ public class ReaderSmokeTest extends Instrumentation {
                 java.nio.file.Files.write(source.toPath(), ("QA Fold " + i + "\n" + "История начинается здесь. A new chapter begins. ".repeat(180)).getBytes(StandardCharsets.UTF_8));
                 fixtures.add(store.importBook(source)); source.delete();
             }
-            screen = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            screen = startStableMain(context);
             awaitField(screen, "librarySearch");
             MainActivity first = screen;
             runOnMainSync(() -> ((EditText) field(first, "librarySearch")).setText("QA Fold")); waitForIdleSync(); Thread.sleep(500);
@@ -1099,7 +1099,7 @@ public class ReaderSmokeTest extends Instrumentation {
                 throw new AssertionError("Repair changed identity/progress or lost images");
             book = repaired;
             prefs.edit().putString("options", "{\"pages\":true,\"size\":21,\"volumePages\":true}").putInt("anchor." + book.id(), 0).commit();
-            screen = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            screen = startStableMain(context);
             awaitField(screen, "librarySearch");
             MainActivity opened = screen; Books.Book fixture = book;
             runOnMainSync(() -> invoke(opened, "open", new Class[]{Books.Book.class, boolean.class}, fixture, false));
@@ -1553,7 +1553,7 @@ public class ReaderSmokeTest extends Instrumentation {
                     notes.add(new Books.Note(at, at + 3, "The lighthouse guided travelers safely home.\n\n".repeat(scenario >= 2 ? 30 : 1)));
                 Books.Book book = new Books.Book("note-spotlight-" + scenario, "Lighthouse", "MJReader Originals", text,
                         java.util.List.of(new Books.Chapter("Lighthouse", 0)), null, java.util.List.of(), notes);
-                MainActivity screen = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                MainActivity screen = startStableMain(context);
                 try {
                     awaitField(screen, "librarySearch");
                     runOnMainSync(() -> invoke(screen, "open", new Class[]{Books.Book.class, boolean.class}, book, false));
