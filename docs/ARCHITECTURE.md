@@ -62,7 +62,7 @@ The UI is composed programmatically. Library rows are virtualized with `ListView
 Columns depend on window width and font scale. Paged reading uses one page on phones
 and two pages from 640 dp of available reader width (more for large system fonts).
 Each page lays out at most 18k characters, and only visible illustrations decode pixels.
-Continuous scrolling is the default and keeps a 700 dp maximum measure; the reading-mode selector enables pages. Scroll has no footer arrows. Pages turn via arrows or taps in the outer 25% on either side; center taps toggle controls with a 180 ms native edge slide of the header/footer only; rapid reversals and route rebuilds finish the previous transition. System reduced motion makes control changes immediate. Turns use a 180 ms horizontal slide of bounded layouts, without bitmap textures or swipe gestures; reduced motion disables the slide. Catalog uses two columns from 720 dp unless large fonts require a list.
+Continuous scrolling is the default and keeps a 700 dp maximum measure; the reading-mode selector enables pages. Scroll has no footer arrows. Pages turn via arrows or taps in the outer 25% on either side; center taps toggle controls with a 180 ms native 16 dp edge shift and fade of the header/footer only; rapid reversals and route rebuilds finish the previous transition. System reduced motion makes control changes immediate. Turns use a 180 ms horizontal slide of bounded layouts, without bitmap textures or swipe gestures; reduced motion disables the slide. Catalog uses two columns from 720 dp unless large fonts require a list.
 
 Large changes use saved instance state / Activity recreation. Catalog results and
 loaded-page identities also survive configuration changes through non-configuration state.

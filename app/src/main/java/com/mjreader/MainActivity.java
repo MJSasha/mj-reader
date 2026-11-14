@@ -1332,8 +1332,8 @@ public class MainActivity extends Activity {
         if (changed && root.isLaidOut() && android.animation.ValueAnimator.areAnimatorsEnabled()) {
             // Only the controls move. Text reflows once and retains its full-text anchor.
             android.transition.TransitionSet movement = new android.transition.TransitionSet();
-            movement.addTransition(new android.transition.Slide(Gravity.TOP).addTarget(header));
-            if (footer != null) movement.addTransition(new android.transition.Slide(Gravity.BOTTOM).addTarget(footer));
+            movement.addTransition(controlPanelTransition(header, -1));
+            if (footer != null) movement.addTransition(controlPanelTransition(footer, 1));
             movement.setDuration(180);
             movement.setInterpolator(new android.view.animation.DecelerateInterpolator());
             movement.addListener(new android.transition.TransitionListenerAdapter() {
@@ -1351,6 +1351,33 @@ public class MainActivity extends Activity {
         if (enabled) flags |= View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
         getWindow().getDecorView().setSystemUiVisibility(flags);
         if (!focus && textScroll != null) restoreAfterLayout();
+    }
+    private android.transition.Transition controlPanelTransition(View target, int direction) {
+        // A full-root Slide moves a small panel offscreen almost instantly; use 16 dp.
+        android.transition.Visibility transition = new android.transition.Visibility() {
+            private android.animation.Animator motion(View view, boolean entering) {
+                float shift = dp(16) * direction;
+                android.animation.AnimatorSet animation = new android.animation.AnimatorSet();
+                animation.playTogether(
+                        android.animation.ObjectAnimator.ofFloat(view, View.TRANSLATION_Y, entering ? shift : 0, entering ? 0 : shift),
+                        android.animation.ObjectAnimator.ofFloat(view, View.ALPHA, entering ? 0 : 1, entering ? 1 : 0));
+                animation.addListener(new android.animation.AnimatorListenerAdapter() {
+                    @Override public void onAnimationEnd(android.animation.Animator animator) {
+                        view.setTranslationY(0); view.setAlpha(1);
+                    }
+                });
+                return animation;
+            }
+            @Override public android.animation.Animator onAppear(ViewGroup scene, View view,
+                    android.transition.TransitionValues start, android.transition.TransitionValues end) {
+                return motion(view, true);
+            }
+            @Override public android.animation.Animator onDisappear(ViewGroup scene, View view,
+                    android.transition.TransitionValues start, android.transition.TransitionValues end) {
+                return motion(view, false);
+            }
+        };
+        return transition.addTarget(target);
     }
     private void readerMenu() {
         pause();
