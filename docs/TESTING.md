@@ -15,7 +15,7 @@ baseline has warnings (localization formatting, tool versions and storage APIs);
 they are not represented as a clean zero-warning result.
 
 CI splits the same five suites across two independent hosted emulators:
-`smoke,catalog` and `visual,adaptive,updates`. Neither group is optional.
+`smoke,catalog` and `adaptive,visual,updates`. Neither group is optional.
 Artifacts are `android-reports-reading-catalog` and
 `android-reports-interface-fold-updates`. Release reuses successful main CI for
 its exact commit instead of running those suites again.

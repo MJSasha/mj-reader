@@ -61,7 +61,7 @@ jobs:
           - group: reading-catalog
             suites: smoke,catalog
           - group: interface-fold-updates
-            suites: visual,adaptive,updates
+            suites: adaptive,visual,updates
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

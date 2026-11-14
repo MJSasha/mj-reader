@@ -542,7 +542,7 @@ public class ReaderSmokeTest extends Instrumentation {
         MainActivity activity = null;
         try {
             prefs.edit().putLong(keys[0], Long.MAX_VALUE).putString(keys[1], "reading").putInt(keys[2], 120).putBoolean(keys[3], false).commit();
-            activity = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            activity = startStableMain(context);
             awaitField(activity, "librarySearch"); MainActivity screen = activity;
             runOnMainSync(() -> {
                 View resume = screen.getWindow().getDecorView().findViewWithTag("continue-reading");
@@ -553,6 +553,7 @@ public class ReaderSmokeTest extends Instrumentation {
                 View rebuilt = screen.getWindow().getDecorView().findViewWithTag("continue-reading");
                 if (rebuilt == null || rebuilt.isShown()) throw new AssertionError("Search/resume state lost on window rebuild");
             }); waitForIdleSync();
+            awaitText(screen, "Clear search");
             click(screen, "Clear search"); waitForIdleSync();
             runOnMainSync(() -> {
                 View resume = screen.getWindow().getDecorView().findViewWithTag("continue-reading");
