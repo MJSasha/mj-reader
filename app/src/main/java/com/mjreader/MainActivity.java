@@ -37,6 +37,7 @@ public class MainActivity extends Activity {
     private ReadingText reading;
     private ReaderOptions options;
     private LinearLayout root, header, footer;
+    private android.transition.Transition controlsTransition;
     private ListView libraryList;
     private BookAdapter adapter;
     private EditText librarySearch;
@@ -223,7 +224,11 @@ public class MainActivity extends Activity {
     private void shell() {
         if (notePopup != null) notePopup.dismiss();
         renderVersion++;
-        if (root != null) root.animate().cancel();
+        if (root != null) {
+            android.transition.TransitionManager.endTransitions(root);
+            controlsTransition = null;
+            root.animate().cancel();
+        }
         getWindow().setBackgroundDrawable(new ColorDrawable(options.background()));
         root = column();
         ReaderOptions.observeWindow(root, () -> {
@@ -1319,8 +1324,26 @@ public class MainActivity extends Activity {
         if (chapterLabel != null) chapterLabel.setText(current.chapters().get(chapter).title());
     }
     private void setFullscreen(boolean enabled) {
+        boolean changed = fullscreen != enabled;
         fullscreen = enabled;
         if (header == null || current == null) return;
+        android.transition.TransitionManager.endTransitions(root);
+        controlsTransition = null;
+        if (changed && root.isLaidOut() && android.animation.ValueAnimator.areAnimatorsEnabled()) {
+            // Only the controls move. Text reflows once and retains its full-text anchor.
+            android.transition.TransitionSet movement = new android.transition.TransitionSet();
+            movement.addTransition(new android.transition.Slide(Gravity.TOP).addTarget(header));
+            if (footer != null) movement.addTransition(new android.transition.Slide(Gravity.BOTTOM).addTarget(footer));
+            movement.setDuration(180);
+            movement.setInterpolator(new android.view.animation.DecelerateInterpolator());
+            movement.addListener(new android.transition.TransitionListenerAdapter() {
+                @Override public void onTransitionEnd(android.transition.Transition transition) {
+                    if (controlsTransition == movement) controlsTransition = null;
+                }
+            });
+            controlsTransition = movement;
+            android.transition.TransitionManager.beginDelayedTransition(root, movement);
+        }
         header.setVisibility(enabled ? View.GONE : View.VISIBLE);
         if (footer != null) footer.setVisibility(enabled ? View.GONE : View.VISIBLE);
         int flags = options.light() ? View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR : 0;

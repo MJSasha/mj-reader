@@ -43,3 +43,22 @@ class InstrumentationResultCheck(unittest.TestCase):
             reports = pathlib.Path(directory)
             self.assertIn('diagnostic fixture', (reports / 'visual-logcat.txt').read_text())
             self.assertIn('failures="1"', (reports / 'junit.xml').read_text())
+
+
+release_spec = importlib.util.spec_from_file_location('release_checks', path.parent / 'release-checks.py')
+release_checks = importlib.util.module_from_spec(release_spec)
+release_spec.loader.exec_module(release_checks)
+
+
+class ReleaseChecks(unittest.TestCase):
+    def test_only_exact_successful_main_ci_is_accepted(self):
+        good = dict(head_sha='abc', head_branch='main', event='push', status='completed',
+                    conclusion='success', repository={'full_name': 'MJSasha/mj-reader'},
+                    path='.github/workflows/ci.yml', html_url='https://github.com/run/1')
+        self.assertEqual(release_checks.checked_run([good], 'abc', 'MJSasha/mj-reader'), good)
+        self.assertIsNone(release_checks.checked_run([], 'abc', 'MJSasha/mj-reader'))
+        for key, value in [('head_sha', 'old'), ('head_branch', 'feature'), ('event', 'pull_request'),
+                           ('status', 'in_progress'), ('conclusion', 'failure'),
+                           ('conclusion', 'cancelled'), ('path', '.github/workflows/release.yml'),
+                           ('repository', {'full_name': 'some/fork'})]:
+            self.assertIsNone(release_checks.checked_run([dict(good, **{key: value})], 'abc', 'MJSasha/mj-reader'))

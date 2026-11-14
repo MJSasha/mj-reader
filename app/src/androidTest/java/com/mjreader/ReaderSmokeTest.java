@@ -1176,6 +1176,7 @@ public class ReaderSmokeTest extends Instrumentation {
                 ScrollView scroll = (ScrollView) field(normal, "textScroll");
                 scroll.scrollBy(0, 200);
             }); waitForIdleSync();
+            checkControlsMotion(normal);
             capture("scroll-no-arrows-dark");
             int scrolled = (int) field(normal, "anchor");
             if (scrolled <= saved) throw new AssertionError("Continuous scrolling no longer works");
@@ -1194,6 +1195,16 @@ public class ReaderSmokeTest extends Instrumentation {
                 pages = awaitPages(screen);
                 if (pages.columns() != 1 || pages.end() <= pages.start()) throw new AssertionError("Large-text pagination failed");
                 assertTouchTargets(screen.getWindow().getDecorView());
+                runOnMainSync(() -> {
+                    int anchor = (int) field(large, "anchor");
+                    invoke(large, "setFullscreen", new Class[]{boolean.class}, true);
+                    if (field(large, "controlsTransition") != null)
+                        throw new AssertionError("Controls ignore reduced motion");
+                    invoke(large, "setFullscreen", new Class[]{boolean.class}, false);
+                    if (field(large, "controlsTransition") != null || (int) field(large, "anchor") != anchor)
+                        throw new AssertionError("Reduced-motion controls changed position");
+                });
+                pages = awaitPages(large);
                 capture("pages-large-light-" + size);
                 ReaderPages still = pages; int nextPage = pages.end();
                 runOnMainSync(() -> still.turn(1)); pages = awaitPages(large);
@@ -1209,6 +1220,7 @@ public class ReaderSmokeTest extends Instrumentation {
         }
     }
     private void checkEdgeTaps(MainActivity activity) throws Exception {
+        checkControlsMotion(activity);
         for (boolean fullscreen : new boolean[]{false, true}) {
             ReaderPages pages = awaitPages(activity);
             int start = pages.start(), end = pages.end();
@@ -1222,6 +1234,44 @@ public class ReaderSmokeTest extends Instrumentation {
             if (pages.start() != start || (boolean) field(activity, "fullscreen") == fullscreen)
                 throw new AssertionError("Center must toggle panels without turning a page");
         }
+    }
+    private void checkControlsMotion(MainActivity activity) throws Exception {
+        int anchor = (int) field(activity, "anchor");
+        runOnMainSync(() -> {
+            invoke(activity, "setFullscreen", new Class[]{boolean.class}, true);
+            if (field(activity, "controlsTransition") == null)
+                throw new AssertionError("Center toggle should animate controls");
+        });
+        awaitControlsMotion(activity);
+        runOnMainSync(() -> {
+            if (((View) field(activity, "header")).getVisibility() != View.GONE
+                    || ((View) field(activity, "footer")).getVisibility() != View.GONE)
+                throw new AssertionError("Hidden controls still occupy reading space");
+            // Reverse immediately twice, including before the next rendered frame.
+            invoke(activity, "setFullscreen", new Class[]{boolean.class}, false);
+            invoke(activity, "setFullscreen", new Class[]{boolean.class}, true);
+            invoke(activity, "setFullscreen", new Class[]{boolean.class}, false);
+        });
+        awaitControlsMotion(activity);
+        runOnMainSync(() -> {
+            for (String name : new String[]{"header", "footer"}) {
+                View panel = (View) field(activity, name);
+                if (!panel.isShown() || panel.getAlpha() != 1f || panel.getTranslationY() != 0f)
+                    throw new AssertionError("Interrupted control animation left a displaced panel");
+            }
+            if ((int) field(activity, "anchor") != anchor)
+                throw new AssertionError("Control animation moved the reading anchor");
+        });
+    }
+    private void awaitControlsMotion(MainActivity activity) throws Exception {
+        waitForIdleSync();
+        for (int i = 0; i < 100; i++) {
+            boolean[] done = {false};
+            runOnMainSync(() -> done[0] = field(activity, "controlsTransition") == null);
+            if (done[0]) { waitForIdleSync(); return; }
+            Thread.sleep(20);
+        }
+        throw new AssertionError("Controls transition did not finish");
     }
     private android.animation.ValueAnimator awaitPageAnimation(ReaderPages pages) throws Exception {
         for (int i = 0; i < 100; i++) {

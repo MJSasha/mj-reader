@@ -12,16 +12,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  checks:
-    uses: ./.github/workflows/ci.yml
-
   publish:
     name: Sign APK and publish GitHub Release
-    needs: checks
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,6 +31,10 @@ jobs:
         run: |
           python3 scripts/version.py --tag "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           git merge-base --is-ancestor HEAD origin/main
+      - name: Reuse successful main CI for this exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release-checks.py
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
