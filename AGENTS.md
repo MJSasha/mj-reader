@@ -10,6 +10,7 @@ Read this file first, then only the docs and classes relevant to the task.
 - Runnable checks and emulator constraints: `docs/TESTING.md`.
 - Tags, signing and release recovery: `docs/RELEASING.md`.
 - Visual rules: `design-system/mjreader/MASTER.md`.
+- MJ family launcher icons and reusable vector template: `design-system/mj-family/ICONS.md`. Read before changing or creating an app icon.
 - Current version: `version.properties`. Change both name and code for a release.
 
 ## Stack and commands

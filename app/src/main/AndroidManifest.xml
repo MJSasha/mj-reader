@@ -8,6 +8,7 @@
     <application
         android:allowBackup="false"
         android:icon="@drawable/ic_launcher"
+        android:roundIcon="@drawable/ic_launcher"
         android:label="MJReader"
         android:theme="@style/AppTheme">
         <activity android:name=".UpdateActivity" android:exported="false" />

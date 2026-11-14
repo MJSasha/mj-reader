@@ -4,6 +4,7 @@ Selected with ui-ux-pro-max from the verified Dark Mode (OLED) and E-Ink / Paper
 
 Use Android Views with branded control drawing and dialogs, preserving native accessibility and native file selection. The library carries the visual identity. Reading prioritizes text and hides controls on demand.
 
+- Launcher icons follow the shared [MJ family rules](../mj-family/ICONS.md): fixed MJ monogram, dark background, lime foreground and a small app-specific symbol. The reader uses an open book; adaptive masks and monochrome theming are supplied by Android.
 - Semantic colors live in ReaderOptions. Dark, Dusk, paper and sepia have independent contrast-safe text and accent pairs.
 - Menu actions, settings sections and playback controls share 24-unit outline icons from ReaderIcon. Icons inherit semantic foreground colors; adjacent text supplies the accessible name.
 - Android controls have a minimum 48 dp target. Adjacent buttons have 8 dp spacing. Icon-only controls use native vector drawing and accessible descriptions.

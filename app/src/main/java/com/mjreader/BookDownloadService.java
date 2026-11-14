@@ -141,7 +141,7 @@ public class BookDownloadService extends Service {
     }
     private Notification notification(String text, boolean ongoing) {
         PendingIntent open = PendingIntent.getActivity(this, 26, new Intent(this, CatalogActivity.class).putExtra("downloads", true), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        Notification.Builder builder = new Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_launcher).setContentTitle("MJReader")
+        Notification.Builder builder = new Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_notification).setContentTitle("MJReader")
                 .setContentText(text).setContentIntent(open).setOnlyAlertOnce(true).setAutoCancel(!ongoing).setOngoing(ongoing);
         if (ongoing) builder.addAction(new Notification.Action.Builder(null, tr("Отменить", "Cancel"), PendingIntent.getService(this, 27,
                 new Intent(this, BookDownloadService.class).setAction("cancelAll"), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE)).build());

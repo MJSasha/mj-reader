@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108">
+  <title>MJ Reader — family icon master</title>
+  <!-- Full-bleed adaptive background. The launcher supplies the mask. -->
+  <path id="background" fill="#141925" d="M0 0h108v108H0z"/>
+  <g fill="none" stroke="#C7FF68" stroke-linecap="round" stroke-linejoin="round">
+    <path id="mj-monogram" stroke-width="4.5" d="M32,58 V34 L45,48 L57,34 V58 M76,34 V49 Q76,58 67,58 H66"/>
+    <!-- Replace only this symbol for another MJ app. -->
+    <path id="app-symbol" stroke-width="2.5" d="M42,68 Q48,66 54,70 Q60,66 66,68 V78 Q60,76 54,80 Q48,76 42,78 Z M54,70 V80"/>
+  </g>
+</svg>
