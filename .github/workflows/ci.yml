@@ -5,13 +5,17 @@ name: Checks
     branches: [main]
   pull_request:
   workflow_dispatch:
-  workflow_call:
+    inputs:
+      full_ui:
+        description: 'Also run exhaustive visual and narrow-screen regression suites'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: checks-${{ github.workflow }}-${{ github.ref }}
+  group: checks-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -60,8 +64,8 @@ jobs:
         include:
           - group: reading-catalog
             suites: smoke,catalog
-          - group: interface-fold-updates
-            suites: adaptive,visual,updates
+          - group: reader-motion-updates
+            suites: ${{ inputs.full_ui && 'motion,adaptive,visual,updates' || 'motion,updates' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

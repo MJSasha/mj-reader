@@ -15,10 +15,11 @@ import org.json.*;
 
 public class ReaderSmokeTest extends Instrumentation {
     private String updateFixture;
-    private boolean updatesOnly, visualOnly, sampleOnly, readerOnly, benchmarkOnly, catalogOnly, liveCatalog, adaptiveOnly, showcaseOnly;
+    private boolean updatesOnly, visualOnly, sampleOnly, readerOnly, benchmarkOnly, catalogOnly, liveCatalog, adaptiveOnly, motionOnly, showcaseOnly;
     @Override public void onCreate(Bundle arguments) {
         super.onCreate(arguments);
         showcaseOnly = arguments != null && arguments.getString("showcase", "false").equals("true");
+        motionOnly = arguments != null && arguments.getString("motion", "false").equals("true");
         adaptiveOnly = arguments != null && arguments.getString("adaptive", "false").equals("true");
         catalogOnly = arguments != null && arguments.getString("catalog", "false").equals("true");
         liveCatalog = arguments != null && arguments.getString("live", "false").equals("true");
@@ -37,6 +38,7 @@ public class ReaderSmokeTest extends Instrumentation {
             AppUpdates.prefs(context).edit().putBoolean("automatic", false).commit();
             if (updatesOnly) { new UpdateCheck(this).run(updateFixture); result.putString("stream", "PASS: OTA release selection, checksum/signature/version rejection, daily check limit, themed UI and persisted download cancellation\n"); finish(Activity.RESULT_OK, result); return; }
             if (showcaseOnly) { showcase(); result.putString("stream", "PASS: original demonstration screenshots\n"); finish(Activity.RESULT_OK, result); return; }
+            if (motionOnly) { pagesCheck(); result.putString("stream", "PASS: reader controls motion, rapid reversals, anchors, edge taps, page slides, phone/spread, light/dark, large fonts and reduced motion\n"); finish(Activity.RESULT_OK, result); return; }
             if (adaptiveOnly) { narrowScreenCheck(); adaptiveCheck(); pagesCheck(); result.putString("stream", "PASS: narrow 320/360 dp and Flip 7 proportions, RU/EN labels, phone/Fold/tablet resize, grid, reader position/fullscreen, EPUB illustration repair, exact page seams, one/two-page reflow, catalog retention, hover/focus and touch targets\n"); finish(Activity.RESULT_OK, result); return; }
             if (catalogOnly) { new CatalogCheck(this).run(liveCatalog); result.putString("stream", "PASS: OPDS failover, HTTPS EPUB download, cover/chapters import, cancellation/retry, background import, themed UI and recreation\n"); finish(Activity.RESULT_OK, result); return; }
             if (benchmarkOnly) {

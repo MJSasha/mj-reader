@@ -14,11 +14,17 @@ compiles app/test APKs and runs Android lint. Lint errors fail the build. The cu
 baseline has warnings (localization formatting, tool versions and storage APIs);
 they are not represented as a clean zero-warning result.
 
-CI splits the same five suites across two independent hosted emulators:
-`smoke,catalog` and `adaptive,visual,updates`. Neither group is optional.
+Default CI and the runner use four focused suites across two independent hosted
+emulators: `smoke,catalog` and `motion,updates`. Neither group is optional.
 Artifacts are `android-reports-reading-catalog` and
-`android-reports-interface-fold-updates`. Release reuses successful main CI for
+`android-reports-reader-motion-updates`. Release reuses successful main CI for
 its exact commit instead of running those suites again.
+
+The exhaustive `visual` and `adaptive` suites remain available explicitly through
+`--suites visual,adaptive` or Checks → Run workflow → `full_ui=true`. They are no
+longer a gate for every release. During 0.8.17 development those broad suites
+exposed timing-sensitive setup/empty-list/scroll checks; do not claim they passed
+unless that optional run actually succeeded.
 
 ## Android suites
 
@@ -40,6 +46,7 @@ you want to keep. There is no implicit device selection.
 
 | Suite | Coverage | External requirements |
 | --- | --- | --- |
+| `motion` | Focused generated-EPUB reader regression: bounded illustrations, phone/spread reflow, header/footer motion, same-frame reversals, scroll/page anchors, page slides and edge taps, light/dark, large fonts, short windows and reduced motion | None |
 | `updates` | Release/prerelease ordering, invalid URL/hash/size/draft rejection, APK identity/signature/version guards, daily checks, light/dark update UI, persisted DownloadManager completion/cancellation | Local fixtures only |
 | `smoke` | External VIEW/SEND open/duplicate handling, 10 sp pages and off-marker note taps, nearest-note hit targets, EPUB/FB2 footnotes, standalone/nested/named/XML anchors, adjacent-note boundaries, paragraph preservation and repair, Batch/invalid imports, targeted reimport menu/cancel/wrong-file rejection, TXT/FB2 encodings, FB2.ZIP/embedded assets/chapter offsets/repair/invalid XML, EPUB cover/navigation, duplicates/repair, metadata, collections, reversible deletion, search, bookmarks, RU/EN RSVP, persistence | None |
 | `catalog` | Local HTTPS OPDS, slow-mirror hedge/cancellation, truncated download retry, retries/failover, next pages, cover/chapter import, cancellation/retry, background download, zipped FB2 download/import, keyboard, themes, retained pages | Local test server only |

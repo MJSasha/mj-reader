@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 RUNNER = 'com.mjreader.test/com.mjreader.ReaderSmokeTest'
-SUITES = ('smoke', 'catalog', 'visual', 'adaptive', 'updates')
+SUITES = ('smoke', 'catalog', 'motion', 'updates', 'visual', 'adaptive')
 
 
 def passed(returncode, output):
@@ -21,7 +21,7 @@ def passed(returncode, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--device', required=True, help='Explicit emulator serial, never a physical phone')
-    parser.add_argument('--suites', default=','.join(SUITES))
+    parser.add_argument('--suites', default='smoke,catalog,motion,updates')
     parser.add_argument('--reset-app', action='store_true', help='Erase MJReader test data before each suite')
     parser.add_argument('--reports', type=pathlib.Path, default=ROOT / 'dist/reports/android')
     args = parser.parse_args()
