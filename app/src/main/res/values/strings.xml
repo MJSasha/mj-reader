@@ -5,13 +5,13 @@
     <string name="importing">Opening book…</string>
     <string name="back">Back to library</string>
     <string name="reader">Text</string>
-    <string name="focus_label">FOCUS MODE</string>
+    <string name="focus_label">ONE WORD AT A TIME · RSVP</string>
+    <string name="rsvp_action">One word at a time (RSVP)</string>
     <string name="previous_page">Previous page</string>
     <string name="next_page">Next page</string>
     <string name="start">Start</string>
     <string name="pause">Pause</string>
     <string name="restart">Read again</string>
-    <string name="speed">READING SPEED</string>
-    <string name="wpm">%1$d wpm</string>
+    <string name="speed">Speed, words/min</string>
     <string name="book_progress">Reading position</string>
 </resources>

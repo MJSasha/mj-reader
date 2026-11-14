@@ -19,7 +19,7 @@ final class ReaderSpotlight extends FrameLayout {
         Path focus = new Path(selection);
         // Older Android uses a small filtered snapshot instead of an unsupported GPU effect.
         Bitmap soft = android.os.Build.VERSION.SDK_INT >= 31 ? snapshot
-                : Bitmap.createScaledBitmap(snapshot, Math.max(1, width / 24), Math.max(1, height / 24), true);
+                : Bitmap.createScaledBitmap(snapshot, Math.max(1, width / 12), Math.max(1, height / 12), true);
         View blurred = new View(context) {
             final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
             @Override protected void onDraw(Canvas canvas) {
@@ -29,13 +29,13 @@ final class ReaderSpotlight extends FrameLayout {
             }
         };
         if (android.os.Build.VERSION.SDK_INT >= 31)
-            blurred.setRenderEffect(RenderEffect.createBlurEffect(10 * density, 10 * density, Shader.TileMode.CLAMP));
+            blurred.setRenderEffect(RenderEffect.createBlurEffect(4 * density, 4 * density, Shader.TileMode.CLAMP));
         blurred.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         addView(blurred, new LayoutParams(-1, -1));
         View sharp = new View(context) {
             final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
             @Override protected void onDraw(Canvas canvas) {
-                canvas.drawColor(theme.light() ? 0x70FFFFFF : 0x70000000);
+                canvas.drawColor(theme.light() ? 0x38FFFFFF : 0x38000000);
                 int[] position = new int[2]; getLocationOnScreen(position);
                 int save = canvas.save(); canvas.translate(origin[0] - position[0], origin[1] - position[1]);
                 canvas.clipPath(focus);

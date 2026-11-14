@@ -182,11 +182,22 @@ public class ReaderSmokeTest extends Instrumentation {
             awaitField(activity, "reading");
             waitForIdleSync();
             switchMode(activity, true);
+            assertTouchTargets(activity.getWindow().getDecorView());
             click(activity, context.getString(R.string.start));
             Thread.sleep(1100);
             click(activity, context.getString(R.string.pause));
             int advanced = (int) field(activity, "position");
             if (advanced < 1) throw new AssertionError("RSVP did not advance");
+            View seekTools = activity.getWindow().getDecorView().findViewWithTag("rsvp-navigation");
+            if (seekTools == null || seekTools.getVisibility() != View.GONE) throw new AssertionError("RSVP seek tools should start collapsed");
+            click(activity, "Seek");
+            if (seekTools.getVisibility() != View.VISIBLE) throw new AssertionError("RSVP seek tools did not expand");
+            click(activity, "+10 words");
+            if ((int) field(activity, "position") != advanced + 10) throw new AssertionError("RSVP forward word step changed");
+            click(activity, "−10 words");
+            if ((int) field(activity, "position") != advanced) throw new AssertionError("RSVP backward word step changed");
+            click(activity, "Seek");
+            if (seekTools.getVisibility() != View.GONE) throw new AssertionError("RSVP seek tools did not collapse");
             switchMode(activity, false);
             waitForIdleSync();
             int before = (int) field(activity, "anchor");
@@ -549,6 +560,10 @@ public class ReaderSmokeTest extends Instrumentation {
             runOnMainSync(() -> {
                 View resume = screen.getWindow().getDecorView().findViewWithTag("continue-reading");
                 if (resume == null || !resume.getContentDescription().toString().contains("The Quiet Orbit")) throw new AssertionError("Missing most recent reading book");
+                View shelf = screen.getWindow().getDecorView().findViewWithTag("library-shelf");
+                int[] position = new int[2]; shelf.getLocationOnScreen(position);
+                if (position[1] >= 360 * screen.getResources().getDisplayMetrics().density)
+                    throw new AssertionError("Library header leaves too little space for the shelf");
                 ((EditText) field(screen, "librarySearch")).setText("no-matching-book-qa");
                 if (resume.isShown()) throw new AssertionError("Resume card obscures search results");
                 invoke(screen, "library"); // The same rebuild also runs when a Fold window changes size.
@@ -869,6 +884,9 @@ public class ReaderSmokeTest extends Instrumentation {
             waitForIdleSync(); capture("showcase-library-light");
             runOnMainSync(() -> invoke(screen, "open", new Class[]{Books.Book.class, boolean.class}, demo.get(0), false));
             awaitPages(screen); waitForIdleSync();
+            TextView duplicate = ((View) field(screen, "header")).findViewWithTag("reader-book-title");
+            if (duplicate != null && duplicate.getVisibility() != View.GONE)
+                throw new AssertionError("Book and chapter title are repeated");
             runOnMainSync(() -> { ReaderOptions options = (ReaderOptions) field(screen, "options"); options.put("theme", 3); invoke(screen, "changedOptions"); invoke(screen, "jump", new Class[]{int.class}, 0); });
             waitForIdleSync(); capture("showcase-reading");
             runOnMainSync(() -> { ((ReaderOptions) field(screen, "options")).put("theme", 0); invoke(screen, "changedOptions"); setField(screen, "focus", true); invoke(screen, "reader"); });
@@ -1198,6 +1216,15 @@ public class ReaderSmokeTest extends Instrumentation {
                 pages = awaitPages(screen);
                 if (pages.columns() != 1 || pages.end() <= pages.start()) throw new AssertionError("Large-text pagination failed");
                 assertTouchTargets(screen.getWindow().getDecorView());
+                if (size.equals("740x360")) {
+                    View header = (View) field(large, "header"), footer = (View) field(large, "footer");
+                    int target = Math.round(48 * large.getResources().getDisplayMetrics().density);
+                    if (header.getHeight() != target || footer.getHeight() != target)
+                        throw new AssertionError("Short-window reader panels must each fit one 48 dp row");
+                    TextView progress = (TextView) field(large, "counter");
+                    if (progress.getLineCount() != 1 || !progress.getContentDescription().toString().contains("chapter"))
+                        throw new AssertionError("Compact progress lost its full accessible description");
+                }
                 runOnMainSync(() -> {
                     int anchor = (int) field(large, "anchor");
                     invoke(large, "setFullscreen", new Class[]{boolean.class}, true);
@@ -1391,7 +1418,8 @@ public class ReaderSmokeTest extends Instrumentation {
     }
     private void assertChrome(Activity activity, ListView list) {
         runOnMainSync(() -> {
-            TextView brand = find(activity.getWindow().getDecorView(), "MJ / READER");
+            TextView brand = find(activity.getWindow().getDecorView(), activity instanceof MainActivity
+                    ? activity.getString(R.string.library) : "MJ / READER");
             android.graphics.Rect visible = new android.graphics.Rect();
             if (brand == null || !brand.getGlobalVisibleRect(visible) || visible.height() < brand.getHeight())
                 throw new AssertionError("Masthead scrolled away");
@@ -1487,7 +1515,7 @@ public class ReaderSmokeTest extends Instrumentation {
         throw new AssertionError("Search result missing");
     }
     private void switchMode(MainActivity activity, boolean focus) throws Exception {
-        String label = focus ? "RSVP" : getTargetContext().getString(R.string.reader);
+        String label = getTargetContext().getString(focus ? R.string.rsvp_action : R.string.reader);
         if (getTargetContext().getResources().getConfiguration().screenHeightDp < 400) {
             runOnMainSync(() -> invoke(activity, "readerMenu"));
             clickSystem(label);
@@ -1537,6 +1565,7 @@ public class ReaderSmokeTest extends Instrumentation {
             if (root != null) scrollSystem(root);
             Thread.sleep(100);
         }
+        capture("missing-system-control");
         throw new AssertionError("Missing system control " + text);
     }
     private boolean scrollSystem(AccessibilityNodeInfo node) {

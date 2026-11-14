@@ -323,8 +323,7 @@ public class MainActivity extends Activity {
         body = null;
         shell();
         LinearLayout mast = row();
-        TextView brand = label("MJ / READER", 14, options.accent());
-        brand.setLetterSpacing(.16f);
+        TextView brand = label(getString(R.string.library), 24, options.ink());
         brand.setTypeface(Typeface.DEFAULT_BOLD);
         mast.addView(brand, new LinearLayout.LayoutParams(0, -2, 1));
         mast.addView(readerAction("settings", tr("Настройки", "Settings"), () -> settings(false)), new LinearLayout.LayoutParams(dp(48), dp(48)));
@@ -332,15 +331,8 @@ public class MainActivity extends Activity {
         View mastDivider = new View(this);
         mastDivider.setBackgroundColor(options.surface());
         root.addView(mastDivider, new LinearLayout.LayoutParams(-1, dp(1)));
-        boolean compact = getResources().getConfiguration().screenHeightDp < 600;
-        gap(root, compact ? 4 : 12);
-        LinearLayout heading = row();
-        heading.addView(label(getString(R.string.library), compact ? 26 : 34, options.ink()), new LinearLayout.LayoutParams(0, -2, 1));
-        root.addView(heading);
-        if (!compact) {
-            gap(root, 4);
-            root.addView(label(tr("Ваши книги. В вашем ритме.", "Your books. Your pace."), 14, options.muted()));
-        }
+        boolean wide = getResources().getConfiguration().screenWidthDp >= 740
+                && getResources().getConfiguration().fontScale < 1.6f;
         librarySearch = field(query);
         librarySearch.setHint(tr("Название или автор", "Title or author"));
         librarySearch.setContentDescription(tr("Поиск по библиотеке", "Search library"));
@@ -352,9 +344,11 @@ public class MainActivity extends Activity {
         });
         librarySearch.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, "search", options.muted()), null, null, null);
         librarySearch.setCompoundDrawablePadding(dp(12));
-        gap(root, 16);
-        root.addView(librarySearch, matchWrap());
         gap(root, 12);
+        LinearLayout searchRow = row();
+        searchRow.addView(librarySearch, weight());
+        root.addView(searchRow, matchWrap());
+        gap(root, 8);
         boolean narrow = getResources().getConfiguration().screenWidthDp < 400;
         LinearLayout filters = row();
         HorizontalScrollView filterScroll = new HorizontalScrollView(this);
@@ -388,11 +382,15 @@ public class MainActivity extends Activity {
             if (recent != null) {
                 LinearLayout resume = column(); resume.setTag("resume-section");
                 resume.setVisibility(query.isBlank() ? View.VISIBLE : View.GONE);
-                gap(resume, 16); resume.addView(continueCard(recent), matchWrap()); root.addView(resume, matchWrap());
+                if (!wide) gap(resume, 12);
+                resume.addView(continueCard(recent), matchWrap());
+                if (wide) { space(searchRow); searchRow.addView(resume, weight()); }
+                else root.addView(resume, matchWrap());
             }
         }
-        gap(root, 16);
+        gap(root, 12);
         TextView shelf = label(filterLabel(), 18, options.ink());
+        shelf.setTag("library-shelf");
         shelf.setTypeface(Typeface.DEFAULT_BOLD);
         if (narrow) {
             LinearLayout shelfRow = row();
@@ -467,7 +465,7 @@ public class MainActivity extends Activity {
     }
     private View continueCard(Books.Book book) {
         LinearLayout card = row();
-        card.setPadding(dp(16), dp(16), dp(12), dp(16));
+        card.setPadding(dp(12), dp(12), dp(12), dp(12));
         GradientDrawable background = shape(options.surface(), 20);
         card.setBackground(feedback(background));
         ImageView image = new ImageView(this); image.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -475,14 +473,13 @@ public class MainActivity extends Activity {
         Bitmap bitmap = cover(book);
         if (bitmap != null) image.setImageBitmap(bitmap); else image.setImageDrawable(new CoverArt(title(book), book.id().hashCode()));
         image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        card.addView(image, new LinearLayout.LayoutParams(dp(56), dp(84))); space(card);
+        card.addView(image, new LinearLayout.LayoutParams(dp(40), dp(60))); space(card);
         LinearLayout detail = column(); detail.setPadding(dp(4), 0, dp(8), 0);
-        TextView caption = label(tr("ПРОДОЛЖИТЬ ЧТЕНИЕ", "CONTINUE READING"), 11, options.accent());
-        caption.setLetterSpacing(.08f); detail.addView(caption); gap(detail, 6);
-        TextView title = label(title(book), 18, options.ink()); title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setMaxLines(2); title.setEllipsize(TextUtils.TruncateAt.END); detail.addView(title); gap(detail, 6);
         int percent = Math.min(100, (int) (100L * prefs.getInt(key(book, "anchor"), 0) / Math.max(1, book.text().length() - 1)));
-        detail.addView(label(percent + tr("% прочитано", "% read"), 13, options.muted()));
+        TextView caption = label(tr("Продолжить", "Continue reading") + " · " + percent + "%", 13, options.accent());
+        detail.addView(caption); gap(detail, 4);
+        TextView title = label(title(book), 18, options.ink()); title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setMaxLines(2); title.setEllipsize(TextUtils.TruncateAt.END); detail.addView(title);
         card.addView(detail, weight());
         ImageView arrow = new ImageView(this); arrow.setImageDrawable(new ControlIcon("→", options.accent()));
         arrow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
@@ -897,16 +894,19 @@ public class MainActivity extends Activity {
         body = null;
         shell();
         header = column();
+        boolean compact = !focus && getResources().getConfiguration().screenHeightDp < 400;
+        int controlHeight = compact ? dp(48) : -2;
         LinearLayout top = row();
         Button back = button("‹", false, this::library);
         back.setContentDescription(getString(R.string.back));
-        top.addView(back, new LinearLayout.LayoutParams(dp(48), -2));
+        top.addView(back, new LinearLayout.LayoutParams(dp(48), controlHeight));
         space(top);
         LinearLayout identity = column();
         TextView title = label(title(current), 14, options.muted());
+        title.setTag("reader-book-title");
         title.setMaxLines(1);
         title.setEllipsize(TextUtils.TruncateAt.END);
-        identity.addView(title);
+        if (!compact) identity.addView(title);
         chapterLabel = label("", 14, options.ink());
         chapterLabel.setMaxLines(1); chapterLabel.setEllipsize(TextUtils.TruncateAt.END);
         identity.addView(chapterLabel);
@@ -916,24 +916,25 @@ public class MainActivity extends Activity {
         identity.setContentDescription(tr("Оглавление: ", "Contents: ") + title(current));
         top.addView(identity, new LinearLayout.LayoutParams(0, -2, 1));
         space(top);
-        top.addView(readerAction("type", tr("Быстрое оформление", "Quick appearance"), this::quickAppearance), new LinearLayout.LayoutParams(dp(48), -2));
+        top.addView(readerAction("type", tr("Быстрое оформление", "Quick appearance"), this::quickAppearance), new LinearLayout.LayoutParams(dp(48), controlHeight));
         space(top);
         Button menu = button("⋮", false, this::readerMenu);
         menu.setContentDescription(tr("Меню чтения", "Reading menu"));
-        top.addView(menu, new LinearLayout.LayoutParams(dp(48), -2));
+        top.addView(menu, new LinearLayout.LayoutParams(dp(48), controlHeight));
         header.addView(top);
-        gap(header, 8);
+        if (!compact) gap(header, 8);
         LinearLayout modes = row();
         Button text = button(getString(R.string.reader), !focus, () -> { focus = false; reader(); });
         text.setSelected(!focus);
         modes.addView(text, weight());
         space(modes);
         Button rsvp = button("RSVP", focus, () -> { focus = true; reader(); });
+        rsvp.setContentDescription(getString(R.string.rsvp_action));
         rsvp.setSelected(focus);
         modes.addView(rsvp, weight());
         if (focus && getResources().getConfiguration().screenHeightDp >= 400) header.addView(modes);
-        gap(header, 8);
-        chapterLabel.setText(current.chapters().get(chapterIndex()).title());
+        if (!compact) gap(header, 8);
+        updateChapterLabel();
         root.addView(header);
         if (focus) focusScreen(); else {
             textScreen();
@@ -1045,19 +1046,21 @@ public class MainActivity extends Activity {
         });
     }
     private void readingFooter() {
+        boolean compact = getResources().getConfiguration().screenHeightDp < 400;
         footer = column();
-        footer.setPadding(dp(8), dp(8), dp(8), dp(8));
+        footer.setPadding(dp(8), compact ? 0 : dp(8), dp(8), compact ? 0 : dp(8));
         footer.setBackground(shape(options.surface(), 20));
         LinearLayout navigation = row();
         if (options.flag("pages", false)) {
             Button previous = button("←", false, () -> turnPage(-1));
             previous.setContentDescription(getString(R.string.previous_page));
-            navigation.addView(previous, new LinearLayout.LayoutParams(dp(48), -2));
+            navigation.addView(previous, new LinearLayout.LayoutParams(dp(48), compact ? dp(48) : -2));
             space(navigation);
         }
         counter = label("", 13, options.muted());
         counter.setGravity(Gravity.CENTER);
         counter.setMinHeight(dp(48));
+        if (compact) { counter.setMaxLines(1); counter.setEllipsize(TextUtils.TruncateAt.END); }
         counter.setContentDescription(tr("Прогресс и переход по книге", "Reading progress and navigation"));
         counter.setOnClickListener(v -> readingNavigation());
         counter.setFocusable(true);
@@ -1067,7 +1070,7 @@ public class MainActivity extends Activity {
             space(navigation);
             Button next = button("→", false, () -> turnPage(1));
             next.setContentDescription(getString(R.string.next_page));
-            navigation.addView(next, new LinearLayout.LayoutParams(dp(48), -2));
+            navigation.addView(next, new LinearLayout.LayoutParams(dp(48), compact ? dp(48) : -2));
         }
         footer.addView(navigation);
         if (getResources().getConfiguration().screenHeightDp >= 400) {
@@ -1076,10 +1079,10 @@ public class MainActivity extends Activity {
             space(tools);
             tools.addView(readerAction("bookmark", tr("Добавить закладку", "Add bookmark"), this::addBookmark), weight());
             space(tools);
-            tools.addView(readerAction("sun", tr("День / ночь", "Day / night"), () -> {
+            tools.addView(readerAction("sun", tr("Сменить тему: день / ночь", "Change theme: day / night"), () -> {
                 options.put("theme", options.light() ? 0 : 2); changedOptions();
             }), weight());
-            Button rsvp = readerAction("speed", "RSVP", () -> { focus = true; reader(); });
+            Button rsvp = readerAction("speed", getString(R.string.rsvp_action), () -> { focus = true; reader(); });
             space(tools);
             tools.addView(rsvp, weight());
             gap(footer, 8);
@@ -1196,7 +1199,7 @@ public class MainActivity extends Activity {
                     Toast.makeText(this, tr("Абзац скопирован", "Paragraph copied"), Toast.LENGTH_SHORT).show();
                 }).setNegativeButton(android.R.string.cancel, null).show();
     }
-    private void textSizeControl(LinearLayout parent) {
+    private void textSizeControl(LinearLayout parent, boolean quick) {
         boolean shortWindow = getResources().getConfiguration().screenHeightDp < 500;
         boolean sideBySide = shortWindow && getResources().getConfiguration().screenWidthDp >= 600;
         LinearLayout panel = sideBySide ? row() : column();
@@ -1213,23 +1216,25 @@ public class MainActivity extends Activity {
         preview.setTag("text-size-preview");
         preview.setTypeface(Typeface.create(new String[]{"serif", "sans-serif", "monospace"}[options.number("font", 0)], Typeface.NORMAL));
         preview.setLineSpacing(0, options.number("line", 150) / 100f);
-        preview.setMaxLines(shortWindow || getResources().getConfiguration().fontScale >= 1.6f ? 1 : 2);
+        boolean oneLine = quick || shortWindow || getResources().getConfiguration().fontScale >= 1.6f;
+        preview.setMaxLines(oneLine || size > 28 ? 1 : 2);
         preview.setEllipsize(TextUtils.TruncateAt.END); preview.setGravity(Gravity.CENTER_VERTICAL);
         preview.setPadding(dp(12), dp(8), dp(12), dp(8));
         preview.setBackground(shape(options.background(), 14));
-        panel.addView(preview, sideBySide ? new LinearLayout.LayoutParams(0, dp(96), 1) : new LinearLayout.LayoutParams(-1, dp(shortWindow ? 96 : 120)));
+        int previewHeight = dp(quick && !shortWindow && getResources().getConfiguration().fontScale < 1.6f ? 64 : 96);
+        panel.addView(preview, sideBySide ? new LinearLayout.LayoutParams(0, previewHeight, 1) : new LinearLayout.LayoutParams(-1, previewHeight));
         if (sideBySide) space(panel); else gap(panel, 12);
         LinearLayout controls = column();
         range(controls, tr("Размер текста", "Text size"), 10, 36, size, value -> {
             options.put("size", value);
             if (settingsOpen) persistOptions(); else changedOptions();
-        }, value -> preview.setTextSize(value));
+        }, value -> { preview.setTextSize(value); preview.setMaxLines(oneLine || value > 28 ? 1 : 2); });
         panel.addView(controls, sideBySide ? weight() : matchWrap());
         parent.addView(panel, matchWrap());
     }
     private AlertDialog quickAppearance() {
         LinearLayout content = column();
-        textSizeControl(content);
+        textSizeControl(content, true);
         ReaderDialogs sheet = dialogs().setView(content).setNegativeButton(tr("Готово", "Done"), null);
         if (getResources().getConfiguration().screenHeightDp >= 500)
             sheet.setPositiveButton(tr("Все настройки", "All settings"), (d, which) -> settings(false));
@@ -1332,15 +1337,25 @@ public class MainActivity extends Activity {
         }
         return index;
     }
+    private void updateChapterLabel() {
+        String chapter = current.chapters().get(chapterIndex()).title();
+        chapterLabel.setText(chapter);
+        TextView bookTitle = header.findViewWithTag("reader-book-title");
+        if (bookTitle != null) bookTitle.setVisibility(title(current).equals(chapter) ? View.GONE : View.VISIBLE);
+        ((View) chapterLabel.getParent()).setContentDescription(tr("Оглавление: ", "Contents: ") + title(current)
+                + (title(current).equals(chapter) ? "" : " · " + chapter));
+    }
     private void updateTextProgress() {
         if (counter == null || current == null) return;
         int percent = (int) (100L * anchor / Math.max(1, current.text().length() - 1));
         int chapter = chapterIndex();
         int end = chapter + 1 < current.chapters().size() ? current.chapters().get(chapter + 1).offset() : current.text().length() - 1;
         int minutes = Math.max(1, (int) Math.ceil((reading.wordAt(end) - position) / 250.0));
-        counter.setText(percent + "%  ·  " + tr("≈ " + minutes + " мин до конца главы", "≈ " + minutes + " min left in chapter"));
-        counter.setContentDescription(counter.getText() + ". " + tr("Навигация", "Navigation"));
-        if (chapterLabel != null) chapterLabel.setText(current.chapters().get(chapter).title());
+        String progress = percent + "%  ·  " + tr("≈ " + minutes + " мин до конца главы", "≈ " + minutes + " min left in chapter");
+        counter.setText(getResources().getConfiguration().screenHeightDp < 400
+                ? percent + "%  ·  " + tr("≈ " + minutes + " мин", "≈ " + minutes + " min") : progress);
+        counter.setContentDescription(progress + ". " + tr("Навигация", "Navigation"));
+        if (chapterLabel != null) updateChapterLabel();
     }
     private void cancelControlsAnimation() {
         if (controlsAnimation == null) return;
@@ -1392,7 +1407,7 @@ public class MainActivity extends Activity {
     private void readerMenu() {
         pause();
         String[] items = {tr("Поиск в книге", "Search book"), tr("Закладки и цитаты", "Bookmarks & quotes"),
-                tr("Навигация", "Navigation"), tr("Настройки", "Settings"), focus ? getString(R.string.reader) : "RSVP"};
+                tr("Навигация", "Navigation"), tr("Настройки", "Settings"), focus ? getString(R.string.reader) : getString(R.string.rsvp_action)};
         dialogs().setTitle(tr("Чтение", "Reading")).setItems(items, (d, index) -> {
             switch (index) {
                 case 0 -> searchBook();
@@ -1545,6 +1560,44 @@ public class MainActivity extends Activity {
         counter = label("", 13, options.muted());
         counter.setGravity(Gravity.CENTER);
         content.addView(counter);
+        gap(content, 12);
+        play = button(getString(R.string.start), true, this::togglePlayback);
+        content.addView(play, matchWrap());
+        gap(content, 16);
+        range(content, getString(R.string.speed), 100, 900, speed, value -> {
+            speed = value; options.put("speed", speed); persistOptions(); updateFocus();
+        });
+        LinearLayout navigation = column();
+        navigation.setTag("rsvp-navigation");
+        navigation.setVisibility(View.GONE);
+        String navigationTitle = tr("Перемотка", "Seek");
+        Button expand = button(navigationTitle, false, () -> {});
+        expand.setTextSize(14);
+        expand.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        expand.setBackground(feedback(shape(options.background(), 14)));
+        expand.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, new ControlIcon("⌄", options.muted()), null);
+        expand.setContentDescription(navigationTitle + ". " + tr("Развернуть", "Expand"));
+        expand.setOnClickListener(v -> {
+            boolean opened = navigation.getVisibility() != View.VISIBLE;
+            navigation.setVisibility(opened ? View.VISIBLE : View.GONE);
+            expand.setSelected(opened);
+            expand.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, new ControlIcon(opened ? "⌃" : "⌄", options.muted()), null);
+            expand.setContentDescription(navigationTitle + ". " + (opened ? tr("Свернуть", "Collapse") : tr("Развернуть", "Expand")));
+        });
+        LinearLayout actions = row();
+        boolean stackedActions = getResources().getConfiguration().screenWidthDp < 400
+                && getResources().getConfiguration().fontScale >= 1.6f;
+        if (stackedActions) actions.setOrientation(LinearLayout.VERTICAL);
+        actions.addView(expand, stackedActions ? matchWrap() : weight());
+        if (stackedActions) gap(actions, 8); else space(actions);
+        Button profiles = button(tr("Настройки", "Settings"), false, () -> settings(true));
+        profiles.setContentDescription(tr("Настройки RSVP", "RSVP settings"));
+        profiles.setTextSize(14);
+        profiles.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        profiles.setBackground(feedback(shape(options.background(), 14)));
+        actions.addView(profiles, stackedActions ? matchWrap() : weight());
+        content.addView(actions, matchWrap());
+        content.addView(navigation, matchWrap());
         progress = new SeekBar(this);
         tintSeekBar(progress);
         progress.setMax(reading.words.size() - 1);
@@ -1552,26 +1605,18 @@ public class MainActivity extends Activity {
         progress.setOnSeekBarChangeListener(seekListener(value -> {
             pause(); position = value; anchor = reading.offsets.get(position); updateFocus(); save();
         }));
-        content.addView(progress, new LinearLayout.LayoutParams(-1, dp(48)));
+        navigation.addView(progress, new LinearLayout.LayoutParams(-1, dp(48)));
         LinearLayout controls = row();
-        controls.addView(button("−10", false, () -> seekWords(-10)), weight());
+        controls.addView(button(tr("−10 слов", "−10 words"), false, () -> seekWords(-10)), weight());
         space(controls);
-        play = button(getString(R.string.start), true, this::togglePlayback);
-        controls.addView(play, new LinearLayout.LayoutParams(0, -2, 2));
-        space(controls);
-        controls.addView(button("+10", false, () -> seekWords(10)), weight());
-        content.addView(controls);
-        gap(content, 8);
+        controls.addView(button(tr("+10 слов", "+10 words"), false, () -> seekWords(10)), weight());
+        navigation.addView(controls);
+        gap(navigation, 8);
         LinearLayout sentences = row();
         sentences.addView(button(tr("← Фраза", "← Sentence"), false, () -> seekSentence(-1)), weight());
         space(sentences);
         sentences.addView(button(tr("Фраза →", "Sentence →"), false, () -> seekSentence(1)), weight());
-        content.addView(sentences);
-        gap(content, 16);
-        range(content, getString(R.string.speed), 100, 900, speed, value -> {
-            speed = value; options.put("speed", speed); persistOptions(); updateFocus();
-        });
-        content.addView(button(tr("Профили и настройки", "Profiles & settings"), false, () -> settings(true)), matchWrap());
+        navigation.addView(sentences);
         updateFocus();
     }
     private void togglePlayback() {
@@ -1607,7 +1652,9 @@ public class MainActivity extends Activity {
         if (focusView == null || reading == null) return;
         focusView.invalidate();
         focusView.setContentDescription(reading.words.get(position));
-        counter.setText(String.format(Locale.getDefault(), "%d / %d · %s", position + 1, reading.words.size(), getString(R.string.wpm, speed)));
+        counter.setText(String.format(Locale.getDefault(), "%d / %d", position + 1, reading.words.size()));
+        counter.setContentDescription(tr("Позиция в словах: ", "Word position: ") + counter.getText());
+        updateChapterLabel();
         progress.setProgress(position);
         contextLabel.setText(playing ? "" : String.join(" ", reading.words.subList(Math.max(0, position - 5), Math.min(reading.words.size(), position + 7))));
         if (!playing && position == reading.words.size() - 1) playbackLabel(R.string.restart);
@@ -1709,7 +1756,8 @@ public class MainActivity extends Activity {
         root.addView(settingsScroll, new LinearLayout.LayoutParams(-1, 0, 1));
         TextView description = label(current == null ? tr("Ваше пространство для чтения", "Your reading space")
                 : title(current), 14, options.muted());
-        page.addView(description);
+        description.setMaxLines(1); description.setEllipsize(TextUtils.TruncateAt.END);
+        if (current != null) page.addView(description);
         LinearLayout sample = column();
         sample.setPadding(dp(20), dp(20), dp(20), dp(20));
         sample.setBackground(shape(options.surface(), 20));
@@ -1732,28 +1780,33 @@ public class MainActivity extends Activity {
         LinearLayout content = column();
         gap(page, 12);
         page.addView(content);
-        if (current != null) toggle(content, tr("Только для этой книги", "Only for this book"), prefs.contains("options." + current.id()), enabled -> {
-            if (enabled) prefs.edit().putString("options." + current.id(), options.values.toString()).apply();
-            else {
-                prefs.edit().remove("options." + current.id()).apply();
-                options = ReaderOptions.load(prefs, null);
-                speed = options.number("speed", 300);
-                settingsY = settingsScroll.getScrollY();
-                settings(rsvp);
-            }
-        });
+        if (current != null) {
+            boolean local = prefs.contains("options." + current.id());
+            String sharedHint = tr("Общие настройки для всех книг", "Shared settings for all books");
+            String localHint = tr("Выключение вернёт общие настройки", "Turn off to restore shared settings");
+            TextView scopeHint = label(local ? localHint : sharedHint, 13, options.muted());
+            toggle(content, tr("Только для этой книги", "Only for this book"), local, enabled -> {
+                if (enabled) {
+                    prefs.edit().putString("options." + current.id(), options.values.toString()).apply();
+                    scopeHint.setText(localHint);
+                } else {
+                    prefs.edit().remove("options." + current.id()).apply();
+                    options = ReaderOptions.load(prefs, null);
+                    speed = options.number("speed", 300);
+                    settingsY = settingsScroll.getScrollY();
+                    settings(rsvp);
+                }
+            });
+            content.addView(scopeHint);
+        }
         if (!rsvp) {
             content = settingsGroup(page, tr("Чтение", "Reading"));
             choose(content, tr("Режим чтения", "Reading mode"), new String[]{tr("Прокрутка", "Scroll"), tr("Листание", "Pages")},
                     options.flag("pages", false) ? 1 : 0,
                     value -> { options.put("pages", value == 1); changedOptions(); });
-            content.addView(label(tr("Прокрутка — непрерывный текст. Листание — страницы и развороты на широком экране.",
-                    "Scroll for continuous text. Pages for single pages or a spread on wide screens."), 14, options.muted()));
-            gap(content, 8);
-            content = settingsGroup(page, tr("Типографика", "Typography"));
             choose(content, tr("Шрифт", "Typeface"), new String[]{tr("С засечками", "Serif"), tr("Без засечек", "Sans serif"), tr("Моноширинный", "Monospace")},
                     options.number("font", 0), value -> { options.put("font", value); changedOptions(); });
-            textSizeControl(content);
+            textSizeControl(content, false);
             range(content, tr("Межстрочный интервал, %", "Line height, %"), 110, 200, options.number("line", 150),
                     value -> { options.put("line", value); changedOptions(); });
             toggle(content, tr("Переносы слов", "Word hyphenation"), options.flag("hyphenation", true),
@@ -1773,8 +1826,8 @@ public class MainActivity extends Activity {
                     options.number("alignment", 0), value -> { options.put("alignment", value); changedOptions(); });
             toggle(content, tr("Листать кнопками громкости", "Turn pages with volume keys"), options.flag("volumePages", false),
                     value -> { options.put("volumePages", value); persistOptions(); });
-            content.addView(label(tr("В режиме листания: стрелки и края — страницы, центр — панели. Удержание текста — цитата.",
-                    "Page mode: arrows or edge taps turn pages, center toggles controls. Hold text to save a quote."), 14, options.muted()));
+            content.addView(label(tr("Прокрутка — непрерывный текст. Листание — страницы и развороты. Стрелки и края листают, центр скрывает панели. Удержание текста — цитата. Aт — размер текста, солнце — смена темы, спидометр — чтение по одному слову (RSVP).",
+                    "Scroll for continuous text; Pages for pages and spreads. Arrows and edges turn pages; the center hides controls. Hold text to save a quote. Aт changes text size, the sun changes theme, and the speedometer reads one word at a time (RSVP)."), 14, options.muted()));
             content = settingsGroup(page, tr("Экран", "Display"));
             range(content, tr("Яркость, 0 = системная", "Brightness, 0 = system"), 0, 100, options.number("brightness", 0),
                     value -> { options.put("brightness", value); persistOptions(); applyWindow(); });
@@ -1938,7 +1991,8 @@ public class MainActivity extends Activity {
             } else if (symbol.equals("+") || symbol.equals("−")) {
                 canvas.drawLine(5, 12, 19, 12, paint);
                 if (symbol.equals("+")) canvas.drawLine(12, 5, 12, 19, paint);
-            } else if (symbol.equals("⌄")) {
+            } else if (symbol.equals("⌄") || symbol.equals("⌃")) {
+                if (symbol.equals("⌃")) { canvas.translate(0, 24); canvas.scale(1, -1); }
                 canvas.drawLine(6, 9, 12, 15, paint);
                 canvas.drawLine(12, 15, 18, 9, paint);
             } else {
