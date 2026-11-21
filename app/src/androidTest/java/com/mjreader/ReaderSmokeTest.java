@@ -1265,10 +1265,12 @@ public class ReaderSmokeTest extends Instrumentation {
                     ViewGroup dock = (ViewGroup) field(opened, "footer");
                     ViewGroup actions = (ViewGroup) dock.getChildAt(dock.getChildCount() - 1);
                     for (int i = 0; i < actions.getChildCount(); i++) if (actions.getChildAt(i) instanceof Button button) {
-                        var background = (android.graphics.drawable.LayerDrawable) button.getBackground();
-                        android.graphics.Rect icon = background.getDrawable(1).getBounds();
-                        if (Math.abs(icon.centerX() - button.getWidth() / 2) > 1 || Math.abs(icon.centerY() - button.getHeight() / 2) > 1)
-                            throw new AssertionError("Action icon is outside the center of its hit target");
+                        if (!(button.getCompoundDrawablesRelative()[1] instanceof android.graphics.drawable.LayerDrawable indicator))
+                            throw new AssertionError("Reading action must show an icon above its label");
+                        android.graphics.Rect icon = indicator.getDrawable(1).getBounds(), bounds = indicator.getBounds();
+                        if (Math.abs(icon.centerX() - bounds.centerX()) > 1 || Math.abs(icon.centerY() - bounds.centerY()) > 1
+                                || (button.getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK) != Gravity.CENTER_HORIZONTAL)
+                            throw new AssertionError("Action icon is outside the center of its indicator");
                         button.setHovered(true);
                     }
                 });
