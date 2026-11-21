@@ -64,11 +64,24 @@ final class CatalogCheck {
                 require(executor.submit(() -> true).get(2, TimeUnit.SECONDS), "Cancelled catalog request releases its worker");
             } finally { executor.shutdownNow(); }
             require(Flibusta.bookUrls("https://unrelated.test/book.epub", Flibusta.MIRRORS).size() == 1, "Never remap unrelated book hosts");
+            require(Flibusta.bookUrls("https://flibusta.is/b/436421/fb2/opds",
+                    List.of("https://flibusta.site/opds", "https://unrelated.test/opds")).equals(
+                    List.of("https://flibusta.is/b/436421/fb2/opds", "https://flibusta.site/b/436421/fb2/opds")),
+                    "Only known Flibusta mirrors share Flibusta book paths");
+            require(Flibusta.preferFb2(new Flibusta.Acquisition("https://flibusta.is/b/436421/fb2/opds", "fb2"))
+                    && !Flibusta.preferFb2(new Flibusta.Acquisition(origin + "/b/436421/fb2/opds", "fb2")),
+                    "Prefer ready FB2 downloads at Flibusta");
+            var redirected = Flibusta.load(origin + "/redirect/opds");
+            require(redirected.entries().get(0).url().equals(origin + "/redirected/opds/local.txt")
+                    && redirected.next().equals(origin + "/redirected/opds/search?page=2"), "Resolve feed links from the final URL");
             var first = failover.feed().entries().get(0);
             require(first.book() && first.format().equals("epub") && first.author().equals("MJReader"), "OPDS EPUB preference and author");
+            require(first.alternatives().equals(List.of(new Flibusta.Acquisition(origin + "/not-used.fb2", "fb2"))),
+                    "Keep the advertised FB2 alongside EPUB");
             Flibusta.Entry fb2Entry = null;
             for (String mime : new String[]{"application/fb2+zip", "application/x-fictionbook+xml", "application/fb2+xml", "application/x-fictionbook"}) {
                 String feed = "<feed xmlns='http://www.w3.org/2005/Atom'><entry><title>FB2 from catalog</title>"
+                        + "<link rel='http://opds-spec.org/acquisition' type='application/epub+zip' href='http://other.test/insecure.epub'/>"
                         + "<link rel='http://opds-spec.org/acquisition' type='text/plain' href='/unused.txt'/>"
                         + "<link rel='http://opds-spec.org/acquisition' type='" + mime + "' href='/book.fb2'/></entry></feed>";
                 fb2Entry = Flibusta.parse(feed.getBytes(StandardCharsets.UTF_8), origin).entries().get(0);
@@ -100,7 +113,6 @@ final class CatalogCheck {
             String xxe = "<!DOCTYPE feed [<!ENTITY x SYSTEM 'file:///data/local/tmp/secret'>]><feed xmlns='http://www.w3.org/2005/Atom'><title>&x;</title></feed>";
             try { Flibusta.parse(xxe.getBytes(StandardCharsets.UTF_8), origin); throw new AssertionError("DTD entities accepted"); } catch (IOException expected) { }
             context.getSharedPreferences("reader", 0).edit().putString("catalog", origin + "/good/opds").commit();
-            test.getUiAutomation().executeShellCommand("pm grant com.mjreader android.permission.POST_NOTIFICATIONS").close();
             for (int theme : new int[]{0, 2}) {
                 context.getSharedPreferences("reader", 0).edit().putString("options", "{\"theme\":" + theme + "}").commit();
                 CatalogActivity screen = (CatalogActivity) test.startActivitySync(new Intent(context, CatalogActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -136,12 +148,28 @@ final class CatalogCheck {
                     int index = ((List<?>) field(screen, "entries")).indexOf(first);
                     test.runOnMainSync(() -> ((ListView) uncheckedField(screen, "resultsList")).setSelectionFromTop(index + 1, 0)); test.waitForIdleSync();
                     capture("catalog-direct-download");
-                    test.runOnMainSync(() -> {
-                        boolean russian = context.getResources().getConfiguration().getLocales().get(0).getLanguage().equals("ru");
-                        Button button = downloadButton(screen.getWindow().getDecorView(), (russian ? "Скачать: " : "Download: ") + first.title());
-                        require(button != null && button.performClick(), "Download directly from book card");
-                    }); awaitUi(screen);
-                    String id = BookDownloads.create(context, first); jobs.add(id); JSONObject complete = waitState(id, "complete", 20000);
+                    CountDownLatch releaseCatalogWorker = new CountDownLatch(1);
+                    ((ExecutorService) field(screen, "worker")).execute(() -> {
+                        try { releaseCatalogWorker.await(); }
+                        catch (InterruptedException stopped) { Thread.currentThread().interrupt(); }
+                    });
+                    JSONObject complete;
+                    try {
+                        test.runOnMainSync(() -> {
+                            boolean russian = context.getResources().getConfiguration().getLocales().get(0).getLanguage().equals("ru");
+                            Button button = downloadButton(screen.getWindow().getDecorView(), (russian ? "Скачать: " : "Download: ") + first.title());
+                            require(button != null && button.performClick(), "Download directly from book card");
+                            screen.finish();
+                        });
+                        String id = waitJob(first.url()); jobs.add(id);
+                        complete = waitState(id, "complete", 20000);
+                    } finally { releaseCatalogWorker.countDown(); }
+                    if (android.os.Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                            != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        test.getUiAutomation().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK);
+                        test.waitForIdleSync();
+                    }
+                    CatalogActivity taskScreen = (CatalogActivity) test.startActivitySync(new Intent(context, CatalogActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("downloads", true));
                     String bookId = complete.getString("book"); imported.add(bookId);
                     Books.Book book = new Books(context).list().stream().filter(b -> b.id().equals(bookId)).findFirst().orElseThrow();
                     require(book.title().equals("Орбита из каталога") && book.chapters().size() == 2 && book.cover() != null, "EPUB title, cover and chapters imported");
@@ -151,14 +179,18 @@ final class CatalogCheck {
                     JSONObject recovered = waitState(brokenId, "complete", 20000); imported.add(recovered.getString("book"));
                     require(brokenTransfers.get() == 2 && new Books(context).list().stream().anyMatch(b -> b.id().equals(recovered.optString("book"))
                             && b.text().equals("The lighthouse transfer recovered.")), "Truncated transfer retries from zero without duplicated bytes");
-                    String fb2Id = BookDownloads.create(context, fb2Entry); jobs.add(fb2Id);
+                    var fallback = new Flibusta.Entry("Format fallback", "", "", origin + "/invalid.epub", "epub", true,
+                            List.of(new Flibusta.Acquisition(fb2Entry.url(), fb2Entry.format())));
+                    String fb2Id = BookDownloads.create(context, new Flibusta.Entry(fallback.title(), "", "",
+                            fallback.url(), fallback.format(), true)); jobs.add(fb2Id);
+                    require(BookDownloads.create(context, fallback).equals(fb2Id), "Update a saved download without changing its ID");
                     test.runOnMainSync(() -> BookDownloadService.command(context, "start", fb2Id));
                     JSONObject fb2Complete = waitState(fb2Id, "complete", 20000); imported.add(fb2Complete.getString("book"));
-                    require(new Books(context).list().stream().anyMatch(b -> b.id().equals(fb2Complete.optString("book"))
-                            && b.title().equals("Маяк из FB2") && b.text().contains("Мира нашла сигнал.")), "HTTPS zipped FB2 download/import");
+                    require(fb2Complete.optString("downloadFormat").equals("fb2")
+                            && new Books(context).list().stream().anyMatch(b -> b.id().equals(fb2Complete.optString("book"))
+                            && b.title().equals("Маяк из FB2") && b.text().contains("Мира нашла сигнал.")),
+                            "Invalid EPUB falls back to a persisted FB2 acquisition and imports the ZIP");
                     Thread.sleep(1300); capture("catalog-complete");
-                    test.runOnMainSync(screen::finish);
-                    CatalogActivity taskScreen = (CatalogActivity) test.startActivitySync(new Intent(context, CatalogActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("downloads", true));
                     var slowEntry = failover.feed().entries().get(1); String slowId = BookDownloads.create(context, slowEntry); jobs.add(slowId);
                     test.runOnMainSync(() -> BookDownloadService.command(context, "start", slowId));
                     long deadline = System.currentTimeMillis() + 10000;
@@ -192,9 +224,17 @@ final class CatalogCheck {
         try (socket) {
             BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII)); String line = reader.readLine();
             if (line == null) return; String path = line.split(" ")[1]; while ((line = reader.readLine()) != null && !line.isEmpty()) { }
+            if (path.equals("/redirect/opds")) {
+                socket.getOutputStream().write(("HTTP/1.1 302 Found\r\nLocation: /redirected/opds/search?query=original\r\n"
+                        + "Content-Length: 0\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+                return;
+            }
             if (path.startsWith("/stall/")) { slowCatalog.incrementAndGet(); Thread.sleep(5000); }
             int status = path.startsWith("/bad/") || path.startsWith("/flaky/") && transientRequests.getAndIncrement() < 2 ? 503 : 200;
             byte[] data = path.equals("/broken.txt") ? "The lighthouse transfer recovered.".getBytes(StandardCharsets.UTF_8) : path.equals("/book.fb2") ? fb2() : path.equals("/book.epub") ? epub : path.equals("/slow.txt") ? slow : feed(origin, path.contains("page=2")).getBytes(StandardCharsets.UTF_8);
+            if (path.startsWith("/redirected/opds/")) data = ("<feed xmlns='http://www.w3.org/2005/Atom'>"
+                    + "<link rel='next' href='?page=2'/><entry><title>Redirected</title>"
+                    + "<link rel='http://opds-spec.org/acquisition' type='text/plain' href='local.txt'/></entry></feed>").getBytes(StandardCharsets.UTF_8);
             String mime = path.endsWith("fb2") ? "application/fb2+zip" : path.endsWith("epub") ? "application/epub+zip" : path.endsWith("txt") ? "text/plain" : "application/atom+xml";
             OutputStream output = socket.getOutputStream(); output.write(("HTTP/1.1 " + status + " Test\r\nContent-Type: " + mime + "\r\nContent-Length: " + data.length + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
             if (path.equals("/broken.txt") && brokenTransfers.getAndIncrement() == 0) { output.write(data, 0, 5); output.flush(); return; }
@@ -234,6 +274,16 @@ final class CatalogCheck {
             Button button = downloadButton(group.getChildAt(i), description); if (button != null) return button;
         }
         return null;
+    }
+    private String waitJob(String url) throws InterruptedException {
+        long end = System.currentTimeMillis() + 5000;
+        while (System.currentTimeMillis() < end) {
+            for (JSONObject job : BookDownloads.list(context)) {
+                if (url.equals(job.optString("url"))) return job.optString("id");
+            }
+            Thread.sleep(100);
+        }
+        throw new AssertionError("Download not queued after closing catalog: " + url);
     }
     private JSONObject waitState(String id, String state, long timeout) throws Exception {
         long end = System.currentTimeMillis() + timeout; JSONObject job = null;

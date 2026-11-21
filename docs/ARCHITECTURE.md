@@ -85,9 +85,13 @@ connections, freeing the catalog worker for a new search. Eight feeds are cached
 by exact URL. Permanent HTTP/XML errors do not retry the same mirror.
 Live availability is not guaranteed by a successful previous check.
 
-Downloads are serialized, capped at 32 MB and persisted. Up to three automatic attempts recover transient network errors and truncated streams, switching known mirror origins. Each attempt restarts the file from zero;
-HTTP Range resume is not implemented. Process interruption is shown in the downloads UI
-and requires user retry. A completed import notifies the visible library by local broadcast.
+Downloads are serialized, capped at 32 MB and persisted. The download action starts the foreground
+service while the catalog is visible. Notification permission is optional. The service tries the
+advertised formats in preference order, with ready-made FB2 first for Flibusta acquisition links.
+Up to three attempts per format recover transient network errors and truncated streams. In automatic
+mode only the built-in Flibusta hosts share Flibusta book paths. Each attempt restarts the file from
+zero. Process interruption is shown in the downloads UI and requires user retry. A completed import
+notifies the visible library by local broadcast.
 
 ## Dependencies and changes
 

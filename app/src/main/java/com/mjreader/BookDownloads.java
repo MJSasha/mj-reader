@@ -35,15 +35,28 @@ final class BookDownloads {
         }
     }
     static String create(Context context, Flibusta.Entry entry) throws Exception {
+        return create(context, entry, false);
+    }
+    static String create(Context context, Flibusta.Entry entry, boolean onTransferWorker) throws Exception {
         if (!entry.book() || !(entry.format().equals("epub") || entry.format().equals("txt") || entry.format().equals("fb2"))) throw new IOException("Нет EPUB, FB2 или TXT / No EPUB, FB2 or TXT available");
         Flibusta.https(entry.url());
         StringBuilder hash = new StringBuilder();
         for (byte b : MessageDigest.getInstance("SHA-256").digest(entry.url().getBytes(StandardCharsets.UTF_8))) hash.append(String.format(Locale.ROOT, "%02x", b & 255));
         String id = hash.toString();
         synchronized (LOCK) {
-            if (new File(dir(context, id), "job.json").exists()) return id;
-            save(context, new JSONObject().put("id", id).put("title", entry.title()).put("author", entry.author()).put("url", entry.url())
-                    .put("format", entry.format()).put("state", "queued").put("done", 0).put("total", -1).put("created", System.currentTimeMillis()));
+            boolean exists = new File(dir(context, id), "job.json").exists();
+            JSONObject job = exists ? get(context, id) : new JSONObject().put("id", id).put("title", entry.title())
+                    .put("author", entry.author()).put("url", entry.url()).put("format", entry.format())
+                    .put("state", "queued").put("done", 0).put("total", -1).put("created", System.currentTimeMillis());
+            if (exists && (entry.alternatives().isEmpty() || job.has("alternatives") ||
+                    job.optString("state").equals("complete") || !onTransferWorker && BookDownloadService.active(id))) return id;
+            if (!entry.alternatives().isEmpty()) {
+                JSONArray alternatives = new JSONArray();
+                for (Flibusta.Acquisition link : entry.alternatives())
+                    alternatives.put(new JSONObject().put("url", link.url()).put("format", link.format()));
+                job.put("alternatives", alternatives);
+            }
+            save(context, job);
         }
         return id;
     }

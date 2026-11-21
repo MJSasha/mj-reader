@@ -41,14 +41,21 @@ public class CatalogActivity extends Activity {
     private final List<Flibusta.Entry> entries = new ArrayList<>();
     private final Deque<String> history = new ArrayDeque<>();
     private List<JSONObject> jobs = new ArrayList<>();
+    private Set<String> activeJobs = Set.of();
     private BaseAdapter adapter;
     private final Runnable refresh = new Runnable() {
         @Override public void run() {
             if (downloads && !busy && !refreshing) { refreshing = true; worker.execute(() -> {
                 List<JSONObject> updated = BookDownloads.list(CatalogActivity.this);
                 runOnUiThread(() -> { refreshing = false; if (isDestroyed() || !downloads || busy) return;
+                    Set<String> active = new HashSet<>();
+                    for (JSONObject job : updated) {
+                        String id = job.optString("id");
+                        if (BookDownloadService.active(id)) active.add(id);
+                    }
                     boolean structure = jobs.isEmpty() != updated.isEmpty();
-                    boolean changed = !jobs.toString().equals(updated.toString()); jobs = updated;
+                    boolean changed = !active.equals(activeJobs) || !jobs.toString().equals(updated.toString());
+                    jobs = updated; activeJobs = active;
                     if (structure) render(); else if (adapter != null && changed) adapter.notifyDataSetChanged();
                 });
             }); }
@@ -210,7 +217,7 @@ public class CatalogActivity extends Activity {
         if (entry.book()) {
             gap(card, 14);
             List<String> facts = new ArrayList<>();
-            if (!entry.format().isEmpty()) facts.add(entry.format().toUpperCase(Locale.ROOT));
+            if (!entry.format().isEmpty()) facts.add(downloadFormats(entry));
             if (!entry.details().language().isEmpty()) facts.add(entry.details().language().toUpperCase(Locale.ROOT));
             if (!entry.details().size().isEmpty()) facts.add(entry.details().size());
             if (entry.details().downloads() >= 0) facts.add(downloadCount(entry));
@@ -343,7 +350,7 @@ public class CatalogActivity extends Activity {
         detail(page, tr("Издательство", "Publisher"), entry.details().publisher());
         detail(page, tr("Дата издания", "Published"), entry.details().issued());
         detail(page, tr("Идентификатор издания", "Edition identifier"), entry.details().identifier());
-        detail(page, tr("Формат загрузки", "Download format"), entry.format().toUpperCase(Locale.ROOT));
+        detail(page, tr("Форматы загрузки", "Download formats"), downloadFormats(entry));
         detail(page, tr("Размер в каталоге", "Catalog file size"), entry.details().size());
         if (entry.details().downloads() >= 0) { page.addView(text(downloadCount(entry), 14, theme.accent())); gap(page, 16); }
         if (!entry.description().isEmpty()) detail(page, tr("Аннотация", "Description"), entry.description());
@@ -362,20 +369,18 @@ public class CatalogActivity extends Activity {
     private String downloadCount(Flibusta.Entry entry) {
         return tr("Скачиваний: ", "Downloads: ") + java.text.NumberFormat.getIntegerInstance(getResources().getConfiguration().getLocales().get(0)).format(entry.details().downloads());
     }
+    private static String downloadFormats(Flibusta.Entry entry) {
+        StringJoiner formats = new StringJoiner(" / ");
+        formats.add(entry.format().toUpperCase(Locale.ROOT));
+        for (Flibusta.Acquisition link : entry.alternatives()) formats.add(link.format().toUpperCase(Locale.ROOT));
+        return formats.toString();
+    }
     private void download(Flibusta.Entry entry) {
-        rememberQuery(); rememberScroll();
+        try { BookDownloadService.enqueue(this, entry); }
+        catch (RuntimeException error) { error(error); return; }
+        switchTab(true);
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 5);
-        busy = true; message = tr("Создаём загрузку…", "Starting download…"); render(); int token = ++generation;
-        task = worker.submit(() -> {
-            try {
-                String id = BookDownloads.create(this, entry);
-                runOnUiThread(() -> { if (!valid(token)) return;
-                    try { BookDownloadService.command(this, "start", id); busy = false; switchTab(true); }
-                    catch (RuntimeException error) { busy = false; render(); error(error); }
-                });
-            } catch (Exception error) { runOnUiThread(() -> { if (!valid(token)) return; busy = false; render(); error(error); }); }
-        });
     }
     private void catalogSettings() {
         rememberQuery(); rememberScroll();
@@ -442,7 +447,8 @@ public class CatalogActivity extends Activity {
             public View getView(int i, View convert, ViewGroup parent) {
                 JSONObject job = jobs.get(i); String id = job.optString("id"), state = job.optString("state"); boolean active = BookDownloadService.active(id);
                 if (!active && (state.equals("queued") || state.equals("downloading") || state.equals("importing"))) state = "cancelled";
-                String identity = id + ":" + state + ":" + active;
+                if (active && (state.equals("error") || state.equals("cancelled"))) state = "queued";
+                String identity = id + ":" + state + ":" + active + ":" + job.optString("error");
                 if (convert != null && identity.equals(convert.getTag())) { updateDownload(convert, job, active); return convert; }
                 boolean complete = state.equals("complete"); LinearLayout card = card(); card.addView(text(job.optString("title"), 18, theme.ink()));
                 if (!job.optString("author").isEmpty()) { gap(card, 6); card.addView(text(job.optString("author"), 14, theme.muted())); } gap(card, 12);
@@ -470,7 +476,7 @@ public class CatalogActivity extends Activity {
         progress.setIndeterminate(active && job.optLong("total", -1) <= 0); progress.setMax(1000);
         progress.setProgress((int) Math.min(1000, job.optLong("done") * 1000 / Math.max(1, job.optLong("total"))));
         TextView amount = card.findViewWithTag("download-amount");
-        amount.setText(job.optString("format").toUpperCase(Locale.ROOT) + " · " + BookDownloads.size(job.optLong("done"))
+        amount.setText(job.optString("downloadFormat", job.optString("format")).toUpperCase(Locale.ROOT) + " · " + BookDownloads.size(job.optLong("done"))
                 + (job.optString("state").equals("complete") ? "" : " / " + BookDownloads.size(job.optLong("total", -1)))
                 + (active && job.optLong("rate") > 0 ? " · " + BookDownloads.size(job.optLong("rate")) + "/s" : ""));
     }
