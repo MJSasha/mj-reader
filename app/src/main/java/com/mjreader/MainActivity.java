@@ -1255,6 +1255,7 @@ public class MainActivity extends Activity {
         footer.addView(navigation);
         if (getResources().getConfiguration().screenHeightDp >= 400) {
             LinearLayout tools = row();
+            LinearLayout extraTools = ReaderNavigation.twoRows(this) ? row() : tools;
             Button chapters = ReaderNavigation.item(this, options, tr("Главы", "Chapters"), "list", false, this::contents);
             chapters.setContentDescription(tr("Оглавление", "Contents"));
             tools.addView(chapters, weight());
@@ -1262,18 +1263,19 @@ public class MainActivity extends Activity {
             Button bookmark = ReaderNavigation.item(this, options, tr("Закладка", "Bookmark"), "bookmark", false, this::addBookmark);
             bookmark.setContentDescription(tr("Добавить закладку", "Add bookmark"));
             tools.addView(bookmark, weight());
-            space(tools);
+            if (extraTools == tools) space(tools);
             Button theme = ReaderNavigation.item(this, options, tr("Тема", "Theme"), "sun", false, () -> {
                 options.put("theme", options.light() ? 0 : 2); changedOptions();
             });
             theme.setContentDescription(tr("Сменить тему: день / ночь", "Change theme: day / night"));
-            tools.addView(theme, weight());
+            extraTools.addView(theme, weight());
             Button rsvp = ReaderNavigation.item(this, options, "RSVP", "speed", false, () -> { focus = true; reader(); });
             rsvp.setContentDescription(getString(R.string.rsvp_action));
-            space(tools);
-            tools.addView(rsvp, weight());
+            space(extraTools);
+            extraTools.addView(rsvp, weight());
             gap(footer, 8);
             footer.addView(tools);
+            if (extraTools != tools) { gap(footer, 8); footer.addView(extraTools); }
         }
         LinearLayout.LayoutParams dock = new LinearLayout.LayoutParams(-1, -2);
         dock.topMargin = dp(8);

@@ -28,15 +28,13 @@ final class ReaderNavigation {
 
     static void add(LinearLayout parent, ReaderOptions theme, Tab selected, Consumer<Tab> navigate) {
         Context context = parent.getContext();
-        var window = context.getResources().getConfiguration();
-        boolean twoRows = window.fontScale >= 1.6f && window.screenWidthDp < 512 && window.screenHeightDp >= 480;
         var tabs = Tab.values();
         LinearLayout dock = new LinearLayout(context);
         dock.setOrientation(LinearLayout.VERTICAL);
         dock.setTag(TAG);
         dock.setPadding(dp(context, 4), dp(context, 4), dp(context, 4), dp(context, 4));
         dock.setBackground(shape(context, theme.surface(), 20));
-        int columns = twoRows ? 2 : tabs.length;
+        int columns = twoRows(context) ? 2 : tabs.length;
         for (int from = 0; from < tabs.length; from += columns) {
             LinearLayout row = new LinearLayout(context);
             for (int i = from; i < from + columns; i++) {
@@ -56,6 +54,11 @@ final class ReaderNavigation {
         parent.addView(dock, params);
         WindowInsets insets = parent.getRootWindowInsets();
         if (insets != null) updateInsets(parent, insets);
+    }
+
+    static boolean twoRows(Context context) {
+        var window = context.getResources().getConfiguration();
+        return window.fontScale >= 1.6f && window.screenWidthDp < 512 && window.screenHeightDp >= 480;
     }
 
     static Button item(Context context, ReaderOptions theme, String title, String icon, boolean selected, Runnable click) {

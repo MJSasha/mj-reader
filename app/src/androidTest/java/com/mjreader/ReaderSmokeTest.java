@@ -1005,7 +1005,9 @@ public class ReaderSmokeTest extends Instrumentation {
                     runOnMainSync(() -> invoke(screen, "open", new Class[]{Books.Book.class, boolean.class}, book, false));
                     ReaderPages pages = awaitPages(screen); waitForIdleSync();
                     if (pages.columns() != 1) throw new AssertionError("Narrow reader must show one page");
-                    assertTouchTargets(screen.getWindow().getDecorView()); capture("narrow-reader-" + scenario);
+                    assertTouchTargets(screen.getWindow().getDecorView());
+                    assertReadableActions((View) field(screen, "footer"));
+                    capture("narrow-reader-" + scenario);
                     int anchor = (int) field(screen, "anchor");
                     runOnMainSync(() -> { ((ReaderOptions) field(screen, "options")).put("pages", false); invoke(screen, "changedOptions"); });
                     awaitField(screen, "body"); waitForIdleSync();
