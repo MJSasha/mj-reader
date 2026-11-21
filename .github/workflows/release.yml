@@ -60,7 +60,7 @@ jobs:
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
           ./gradlew --no-daemon assembleRelease
           python3 scripts/package-release.py
-      - name: Publish APK, checksum and notes
+      - name: Publish APK, checksum, update manifest and notes
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -68,8 +68,7 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          python3 scripts/release-notes.py "$RELEASE_VERSION" > dist/release/NOTES.md
           gh release create "$RELEASE_TAG" \
-            "dist/release/MJReader-$RELEASE_VERSION.apk" dist/release/SHA256SUMS \
+            "dist/release/MJReader-$RELEASE_VERSION.apk" dist/release/SHA256SUMS dist/release/update.json \
             --verify-tag --title "MJReader $RELEASE_VERSION" \
             --notes-file dist/release/NOTES.md --latest

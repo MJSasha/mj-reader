@@ -19,6 +19,7 @@ final class AppUpdates {
     static final long MAX_APK = 32L * 1024 * 1024;
     static final String API = "https://api.github.com/repos/MJSasha/mj-reader/releases?per_page=20";
     static final String DOWNLOADS = "https://github.com/MJSasha/mj-reader/releases/download/";
+    static final String RELEASES = "https://github.com/MJSasha/mj-reader/releases";
     record Release(String version, String notes, String url, String sha256, long size) {
         JSONObject json() throws JSONException {
             return new JSONObject().put("version", version).put("notes", notes).put("url", url).put("sha256", sha256).put("size", size);
@@ -72,29 +73,62 @@ final class AppUpdates {
         JSONObject item = new JSONObject(json);
         return validated(item.getString("version"), item.optString("notes"), item.getString("url"), item.getString("sha256"), item.getLong("size"));
     }
+    static Release selectManifest(String json, String current) throws Exception {
+        if (new JSONObject(json).getInt("schemaVersion") != 1) throw new IOException("Unknown update manifest schema");
+        Release release = decode(json);
+        return compare(release.version(), current) > 0 ? release : null;
+    }
     static Release check(Context context) throws Exception {
-        HttpURLConnection connection = (HttpURLConnection) new URL(API).openConnection();
-        connection.setInstanceFollowRedirects(false);
-        connection.setConnectTimeout(10000); connection.setReadTimeout(15000);
-        connection.setRequestProperty("Accept", "application/vnd.github+json");
-        connection.setRequestProperty("User-Agent", "MJReader/" + version(context));
-        try {
-            int status = connection.getResponseCode();
-            if (status != 200) throw new IOException("GitHub HTTP " + status);
-            ByteArrayOutputStream output = new ByteArrayOutputStream();
-            try (InputStream input = connection.getInputStream()) {
-                byte[] buffer = new byte[8192]; int count;
-                while ((count = input.read(buffer)) != -1) {
-                    if (output.size() + count > 2 * 1024 * 1024) throw new IOException("Release response too large");
-                    output.write(buffer, 0, count);
+        String current = version(context);
+        String manifest = fetch(RELEASES + "/latest/download/update.json", current, 65536, true);
+        // Older releases published before update.json still use the releases API.
+        Release release = manifest == null
+                ? select(new JSONArray(fetch(API, current, 2 * 1024 * 1024, false)), current)
+                : selectManifest(manifest, current);
+        SharedPreferences.Editor edit = prefs(context).edit().putLong("checked", System.currentTimeMillis());
+        if (release == null) edit.remove("release"); else edit.putString("release", release.json().toString());
+        edit.commit();
+        return release;
+    }
+    static URL manifestRedirect(URL from, String location) throws IOException {
+        if (location == null || location.isBlank()) throw new IOException("Missing update redirect");
+        URL next = new URL(from, location);
+        String host = next.getHost();
+        if (!"https".equals(next.getProtocol()) || next.getUserInfo() != null || next.getRef() != null
+                || (next.getPort() != -1 && next.getPort() != 443)
+                || !(host.equals("github.com") || host.equals("release-assets.githubusercontent.com") || host.equals("objects.githubusercontent.com")))
+            throw new IOException("Invalid update redirect");
+        return next;
+    }
+    private static String fetch(String address, String version, int limit, boolean manifest) throws IOException {
+        URL url = new URL(address);
+        for (int hop = 0; hop < 5; hop++) {
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setInstanceFollowRedirects(false);
+            connection.setConnectTimeout(10000); connection.setReadTimeout(15000);
+            connection.setRequestProperty("Accept", manifest ? "application/octet-stream" : "application/vnd.github+json");
+            connection.setRequestProperty("User-Agent", "MJReader/" + version);
+            try {
+                int status = connection.getResponseCode();
+                if (manifest && status == 404) return null;
+                if (manifest && (status == 301 || status == 302 || status == 303 || status == 307 || status == 308)) {
+                    url = manifestRedirect(url, connection.getHeaderField("Location"));
+                    continue;
                 }
-            }
-            Release release = select(new JSONArray(output.toString(StandardCharsets.UTF_8.name())), version(context));
-            SharedPreferences.Editor edit = prefs(context).edit().putLong("checked", System.currentTimeMillis());
-            if (release == null) edit.remove("release"); else edit.putString("release", release.json().toString());
-            edit.commit();
-            return release;
-        } finally { connection.disconnect(); }
+                if (status != 200) throw new IOException("GitHub HTTP " + status);
+                if (connection.getContentLengthLong() > limit) throw new IOException("Release response too large");
+                ByteArrayOutputStream output = new ByteArrayOutputStream();
+                try (InputStream input = connection.getInputStream()) {
+                    byte[] buffer = new byte[8192]; int count;
+                    while ((count = input.read(buffer)) != -1) {
+                        if (output.size() + count > limit) throw new IOException("Release response too large");
+                        output.write(buffer, 0, count);
+                    }
+                }
+                return output.toString(StandardCharsets.UTF_8.name());
+            } finally { connection.disconnect(); }
+        }
+        throw new IOException("Too many update redirects");
     }
     static synchronized boolean automaticDue(Context context, long now) {
         SharedPreferences prefs = prefs(context);

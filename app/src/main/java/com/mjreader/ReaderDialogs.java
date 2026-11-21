@@ -61,7 +61,7 @@ final class ReaderDialogs {
                 };
                 page.setOrientation(LinearLayout.VERTICAL);
                 page.setPadding(dp(20), dp(12), dp(20), dp(16));
-                page.setBackground(shape(theme.surface(), 24));
+                page.setBackground(shape(theme.surface(), 20));
                 LinearLayout header = new LinearLayout(context);
                 header.setGravity(Gravity.TOP); header.setBaselineAligned(false);
                 TextView heading = text(title == null ? "" : title, 22);
@@ -71,7 +71,7 @@ final class ReaderDialogs {
                 header.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
                 header.addView(new View(context), new LinearLayout.LayoutParams(dp(8), 1));
                 // Only dismiss-only actions move to the header; saving/deleting stays explicit.
-                int closeAction = labels.containsKey(-2) && actions.get(-2) == null ? -2
+                int closeAction = labels.containsKey(-2) && actions.get(-2) == null && dismissLabel(labels.get(-2)) ? -2
                         : labels.size() == 1 && actions.get(-1) == null && "OK".equalsIgnoreCase(labels.get(-1)) ? -1 : 0;
                 String closeLabel = closeAction == 0
                         ? (context.getResources().getConfiguration().getLocales().get(0).getLanguage().equals("ru") ? "Закрыть" : "Close")
@@ -93,12 +93,16 @@ final class ReaderDialogs {
                 viewport.setTag("dialog-scroll"); viewport.setClipToPadding(false);
                 viewport.addView(body);
                 page.addView(viewport, new LinearLayout.LayoutParams(-1, -2, 1));
-                if (message != null) { body.addView(text(message, 16)); gap(body, 16); }
+                if (message != null) {
+                    body.addView(text(message, 16));
+                    if (custom != null || (items != null && items.length > 0)) gap(body, 12);
+                }
                 if (custom != null) body.addView(custom);
                 if (items != null) for (int i = 0; i < items.length; i++) {
                     final int index = i;
                     Button item = control((checked != null && checked[i] ? "✓  " : "") + items[i], false);
                     item.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+                    item.setBackground(theme.feedback(shape(theme.surfaceHigh(), 12), context.getResources().getDisplayMetrics().density));
                     item.setSelected(checked != null && checked[i]);
                     item.setOnClickListener(view -> {
                         if (checked != null) {
@@ -112,16 +116,16 @@ final class ReaderDialogs {
                         }
                     });
                     body.addView(item, new LinearLayout.LayoutParams(-1, -2));
-                    gap(body, 8);
+                    if (i + 1 < items.length) gap(body, 8);
                 }
                 int actionCount = labels.size() - (closeAction == 0 ? 0 : 1);
                 if (actionCount > 0) gap(body, 16);
-                boolean horizontal = actionCount == 2 && context.getResources().getConfiguration().fontScale < 1.6f;
+                var configuration = context.getResources().getConfiguration();
+                boolean horizontal = actionCount == 2 && configuration.screenWidthDp >= 400 && configuration.fontScale < 1.6f;
                 LinearLayout footer = column();
                 if (horizontal) footer.setOrientation(LinearLayout.HORIZONTAL);
                 body.addView(footer, new LinearLayout.LayoutParams(-1, -2));
-                int[] order = horizontal ? new int[]{-2, -3, -1} : new int[]{-1, -3, -2};
-                for (int id : order) if (labels.containsKey(id) && id != closeAction) {
+                for (int id : new int[]{-2, -3, -1}) if (labels.containsKey(id) && id != closeAction) {
                     Button button = control(labels.get(id), id == -1);
                     buttons.put(id, button);
                     button.setOnClickListener(v -> {
@@ -205,6 +209,12 @@ final class ReaderDialogs {
         return null;
     }
     private int dp(int value) { return Math.round(value * context.getResources().getDisplayMetrics().density); }
+    private boolean dismissLabel(String label) {
+        return label.equals(context.getString(android.R.string.cancel)) || switch (label) {
+            case "Отмена", "Закрыть", "Готово", "Cancel", "Close", "Done" -> true;
+            default -> false;
+        };
+    }
     private LinearLayout column() { LinearLayout view = new LinearLayout(context); view.setOrientation(LinearLayout.VERTICAL); return view; }
     private TextView text(String value, int size) {
         TextView view = new TextView(context); view.setText(value); view.setTextSize(size); view.setTextColor(theme.ink()); view.setLineSpacing(dp(3), 1); return view;
@@ -214,12 +224,17 @@ final class ReaderDialogs {
     private Button control(String label, boolean primary) {
         Button button = new Button(context);
         button.setText(label); button.setTextSize(16); button.setAllCaps(false);
-        button.setCompoundDrawablesRelativeWithIntrinsicBounds(ReaderIcon.forLabel(context, label, primary ? theme.onAccent() : theme.ink()), null, null, null);
+        boolean destructive = switch (label) {
+            case "Delete", "Удалить", "Move to Deleted", "Переместить в удалённые", "Remove download", "Убрать загрузку" -> true;
+            default -> false;
+        };
+        int foreground = destructive ? theme.error() : primary ? theme.onAccent() : theme.ink();
+        button.setCompoundDrawablesRelativeWithIntrinsicBounds(ReaderIcon.forLabel(context, label, foreground), null, null, null);
         button.setCompoundDrawablePadding(dp(12));
-        button.setTextColor(primary ? theme.onAccent() : theme.ink());
+        button.setTextColor(foreground);
         button.setPadding(dp(16), dp(12), dp(16), dp(12));
         button.setMinHeight(dp(48)); button.setStateListAnimator(null); button.setElevation(0);
-        button.setBackground(theme.feedback(shape(primary ? theme.accent() : theme.background(), 14), context.getResources().getDisplayMetrics().density));
+        button.setBackground(theme.feedback(shape(primary && !destructive ? theme.accent() : theme.surfaceHigh(), 16), context.getResources().getDisplayMetrics().density));
         return button;
     }
 }

@@ -60,6 +60,9 @@ final class BookDownloads {
         }
         return id;
     }
+    static boolean pending(String state) {
+        return state.equals("queued") || state.equals("downloading") || state.equals("importing");
+    }
     static String size(long bytes) {
         if (bytes < 0) return "—";
         if (bytes < 1024) return bytes + " B";

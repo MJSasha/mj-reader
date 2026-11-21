@@ -49,7 +49,8 @@ MJReader supports API 26+. Follow the existing native resource arrangement:
   chooses the mask. Preserve application ID and signing identity.
 - Notification small icons are separate white silhouettes on transparency.
   Never pass an adaptive icon to `Notification.Builder.setSmallIcon`.
-  MJReader uses `drawable/ic_notification.xml`, an open-book silhouette.
+  The MJReader download notification uses Android's download arrow in the
+  status bar and `drawable/ic_notification.xml` as its open-book tracker.
 
 When copying this design to another app, replace the app symbol in the SVG and
 foreground vector, then provide that app's separate notification silhouette.

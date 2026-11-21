@@ -40,16 +40,29 @@ final class ReaderOptions {
         return (light() ? light : dark)[Math.max(0, Math.min(3, number("accent", 0)))];
     }
     int selection() {
+        if (number("accent", 0) == 0) {
+            if (number("theme", 0) == 0) return 0xFF303D28;
+            if (number("theme", 0) == 2) return 0xFFDCE9CB;
+        }
         int surface = surface(), accent = accent();
         return Color.rgb(
                 (7 * Color.red(surface) + Color.red(accent)) / 8,
                 (7 * Color.green(surface) + Color.green(accent)) / 8,
                 (7 * Color.blue(surface) + Color.blue(accent)) / 8);
     }
-    int onSelection() { return light() ? ink() : accent(); }
+    int onSelection() { return number("theme", 0) == 2 && number("accent", 0) == 0 ? accent() : light() ? ink() : accent(); }
+    int error() { return light() ? 0xFFA32323 : 0xFFFFB4AB; }
+    int outline() { return light() ? 0xFF687267 : 0xFF68778D; }
+    android.graphics.drawable.GradientDrawable feature(float density, int radius) {
+        var background = new android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR, new int[]{surfaceHigh(), surface()});
+        background.setCornerRadius(radius * density);
+        return background;
+    }
     android.graphics.drawable.Drawable feedback(android.graphics.drawable.GradientDrawable normal, float density) {
         android.graphics.drawable.GradientDrawable pressed = (android.graphics.drawable.GradientDrawable) normal.getConstantState().newDrawable().mutate();
-        int base = normal.getColor().getDefaultColor(), overlay = light() ? 0 : 255;
+        int base = normal.getColor() == null ? surfaceHigh() : normal.getColor().getDefaultColor();
+        int overlay = light() ? 0 : 255;
         pressed.setColor(android.graphics.Color.rgb(
                 (int) (android.graphics.Color.red(base) * .88f + overlay * .12f),
                 (int) (android.graphics.Color.green(base) * .88f + overlay * .12f),

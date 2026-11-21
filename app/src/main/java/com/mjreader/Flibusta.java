@@ -284,13 +284,14 @@ final class Flibusta {
             try {
                 if (observer != null) observer.opened(connection);
                 if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException();
+                boolean requestedRange = connection.getRequestProperty("Range") != null;
                 int code = connection.getResponseCode();
                 if (code >= 300 && code < 400) {
                     String location = connection.getHeaderField("Location");
                     if (location == null) throw new IOException("Redirect without location");
                     address = new URL(connection.getURL(), location).toString(); connection.disconnect(); continue;
                 }
-                if (code != 200) throw new HttpError(code, connection.getURL().getHost());
+                if (code != 200 && !(requestedRange && code == 206)) throw new HttpError(code, connection.getURL().getHost());
                 return connection;
             } catch (IOException error) { connection.disconnect(); throw error; }
         }

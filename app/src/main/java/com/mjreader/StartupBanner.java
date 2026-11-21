@@ -15,7 +15,9 @@ import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.style.ForegroundColorSpan;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.animation.PathInterpolator;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -25,6 +27,7 @@ final class StartupBanner extends LinearLayout {
     private static final int LIGHT = 0xFFF0F2EC;
     private final Emblem emblem;
     private ValueAnimator entrance;
+    private ValueAnimator reveal;
     private Runnable ready;
 
     StartupBanner(Context context) {
@@ -67,11 +70,19 @@ final class StartupBanner extends LinearLayout {
         addView(status, statusSize);
         if (!ValueAnimator.areAnimatorsEnabled()) return;
         emblem.progress = 0f;
+        title.setAlpha(0f);
+        title.setTranslationY(dp(12));
+        status.setAlpha(0f);
         entrance = ValueAnimator.ofFloat(0f, 1f);
         entrance.setDuration(520);
         entrance.addUpdateListener(animation -> {
-            emblem.progress = (float) animation.getAnimatedValue();
+            float progress = (float) animation.getAnimatedValue();
+            emblem.progress = progress;
             emblem.invalidate();
+            float wordmarkIn = Math.max(0f, Math.min(1f, (progress - .24f) / .55f));
+            title.setAlpha(wordmarkIn);
+            title.setTranslationY(dp(12) * (1f - wordmarkIn));
+            status.setAlpha(Math.max(0f, (progress - .55f) / .45f));
         });
         entrance.addListener(new AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(Animator animation) {
@@ -83,9 +94,34 @@ final class StartupBanner extends LinearLayout {
         });
     }
 
-    void whenReady(Runnable action) {
-        if (entrance == null || !ValueAnimator.areAnimatorsEnabled()) action.run();
-        else ready = action;
+    @Override public boolean dispatchTouchEvent(MotionEvent event) { return true; }
+
+    void reveal(Runnable complete) {
+        if (!ValueAnimator.areAnimatorsEnabled()) {
+            complete.run();
+            return;
+        }
+        if (entrance != null) {
+            ready = () -> reveal(complete);
+            return;
+        }
+        reveal = ValueAnimator.ofFloat(0f, 1f);
+        reveal.setDuration(420);
+        reveal.setInterpolator(new PathInterpolator(.4f, 0f, .2f, 1f));
+        reveal.addUpdateListener(animation -> {
+            float progress = (float) animation.getAnimatedValue();
+            float scale = 1f + .5f * progress;
+            emblem.setScaleX(scale);
+            emblem.setScaleY(scale);
+            setAlpha(1f - progress);
+        });
+        reveal.addListener(new AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(Animator animation) {
+                reveal = null;
+                complete.run();
+            }
+        });
+        reveal.start();
     }
 
     @Override protected void onAttachedToWindow() {
@@ -96,6 +132,11 @@ final class StartupBanner extends LinearLayout {
     @Override protected void onDetachedFromWindow() {
         ready = null;
         if (entrance != null) entrance.cancel();
+        if (reveal != null) {
+            reveal.removeAllListeners();
+            reveal.cancel();
+            reveal = null;
+        }
         super.onDetachedFromWindow();
     }
 

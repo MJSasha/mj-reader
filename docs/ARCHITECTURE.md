@@ -59,6 +59,10 @@ original text or reset identity just because better metadata became available.
 ## UI and window changes
 
 The UI is composed programmatically. Library rows are virtualized with `ListView`.
+On a fresh launcher start, `StartupBanner` stays above the library while the worker loads books.
+Once the entrance and loading finish, the banner dissolves over the ready library and restores access
+to its controls. Reduced motion makes this handoff immediate. Activity recreation and direct file
+opens skip the banner.
 Columns depend on window width and font scale. Paged reading uses one page on phones
 and two pages from 640 dp of available reader width (more for large system fonts).
 Each page lays out at most 18k characters, and only visible illustrations decode pixels.
@@ -86,12 +90,16 @@ by exact URL. Permanent HTTP/XML errors do not retry the same mirror.
 Live availability is not guaranteed by a successful previous check.
 
 Downloads are serialized, capped at 32 MB and persisted. The download action starts the foreground
-service while the catalog is visible. Notification permission is optional. The service tries the
+service while the catalog is visible. On Android 13+, the Downloads tab can ask once for the optional
+notification permission after enqueueing and while it has focus. Tapping the progress notification opens
+Downloads. The service tries the
 advertised formats in preference order, with ready-made FB2 first for Flibusta acquisition links.
 Up to three attempts per format recover transient network errors and truncated streams. In automatic
-mode only the built-in Flibusta hosts share Flibusta book paths. Each attempt restarts the file from
-zero. Process interruption is shown in the downloads UI and requires user retry. A completed import
-notifies the visible library by local broadcast.
+mode only the built-in Flibusta hosts share Flibusta book paths. A partial file can resume from the
+same final URL with a strong ETag and an exact Content-Range. An ordinary full response replaces it,
+and an invalid range restarts the transfer. The downloads screen can recover persisted interrupted jobs
+while visible. A completed import notifies the library by local broadcast and supplies its book ID to
+the Read action.
 
 ## Dependencies and changes
 
@@ -103,6 +111,6 @@ Android VIEW/SEND content URIs use the existing background import queue; duplica
 
 ## App updates
 
-`AppUpdates` reads a bounded (2 MB) public GitHub releases response on its worker, includes published 0.x prereleases and selects the highest newer numeric version with a complete APK asset. Only exact repository asset URLs with a SHA-256 digest and a declared size of at most 32 MB qualify. Automatic checks are throttled to once per day when entering the library, and can be disabled independently of book settings. Network failure does not interrupt reading.
+`AppUpdates` reads the 64 KiB-bounded `update.json` asset from the latest GitHub release on its worker. It follows HTTPS redirects only to GitHub release asset hosts. If an older release lacks the asset, a 2 MB-bounded releases API response provides compatibility, including published 0.x prereleases. Only exact repository APK URLs with a SHA-256 digest and a declared size of at most 32 MB qualify. Automatic checks are throttled to once per day when entering the library and can be disabled independently of book settings. Network failure does not interrupt reading.
 
 The user starts downloads from `UpdateActivity`. Android DownloadManager owns retries, background execution and transfer persistence. SharedPreferences `updates` stores cached release metadata and the active transfer ID/pending metadata. The APK is in app-specific external downloads; cancel/retry removes the tracked transfer. On completion and again before installation, the worker checks length, SHA-256, package `com.mjreader`, expected version name, an increased version code, a non-debuggable package and the exact installed signing certificate set. No new signing identity is accepted. An installer receives only a content URI with a temporary read grant. Unknown-source permission is requested through Android settings; returning never silently starts installation. Recreation rereads the persisted transfer and revalidates it.

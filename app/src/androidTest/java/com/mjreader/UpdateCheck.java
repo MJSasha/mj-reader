@@ -51,6 +51,19 @@ final class UpdateCheck {
             }
             AppUpdates.Release update = AppUpdates.select(new JSONArray().put(release("99.0.0")), "0.8.8");
             if (!AppUpdates.decode(update.json().toString()).equals(update)) throw new AssertionError("Release persistence");
+            JSONObject manifest = update.json().put("schemaVersion", 1);
+            if (!update.equals(AppUpdates.selectManifest(manifest.toString(), "0.8.8"))
+                    || AppUpdates.selectManifest(manifest.toString(), update.version()) != null)
+                throw new AssertionError("Update manifest selection / installed version");
+            rejects(() -> AppUpdates.selectManifest(manifest.put("schemaVersion", 2).toString(), "0.8.8"));
+            rejects(() -> AppUpdates.selectManifest(manifest.put("schemaVersion", 1).put("url", "https://example.test/update.apk").toString(), "0.8.8"));
+            java.net.URL source = new java.net.URL(AppUpdates.RELEASES + "/latest/download/update.json");
+            if (!AppUpdates.manifestRedirect(source, "/MJSasha/mj-reader/releases/download/v99.0.0/update.json").getHost().equals("github.com")
+                    || !AppUpdates.manifestRedirect(source, "https://release-assets.githubusercontent.com/update.json").getProtocol().equals("https"))
+                throw new AssertionError("GitHub update redirect rejected");
+            rejects(() -> AppUpdates.manifestRedirect(source, "http://github.com/update.json"));
+            rejects(() -> AppUpdates.manifestRedirect(source, "https://github.com:444/update.json"));
+            rejects(() -> AppUpdates.manifestRedirect(source, "https://github.com@example.test/update.json"));
             PackageInfo current = AppUpdates.installed(context);
             PackageInfo candidate = new PackageInfo(); candidate.packageName = current.packageName; candidate.versionName = update.version();
             candidate.versionCode = (int) AppUpdates.code(current) + 1; candidate.signatures = current.signatures;
@@ -78,7 +91,9 @@ final class UpdateCheck {
                 test.runOnMainSync(() -> {
                     ScrollView page = active.findViewById(android.R.id.list);
                     Button download = button(active.getWindow().getDecorView(), "Download update");
-                    page.scrollTo(0, download.getTop());
+                    android.graphics.Rect bounds = new android.graphics.Rect();
+                    download.getDrawingRect(bounds); page.offsetDescendantRectToMyCoords(download, bounds);
+                    page.scrollTo(0, bounds.top);
                 });
                 test.waitForIdleSync(); Thread.sleep(250);
                 test.runOnMainSync(() -> {

@@ -2,7 +2,7 @@
 
 GitHub Actions проверяет push в `main` и pull request. Тег `vX.Y.Z` запускает отдельный
 Release workflow: подтверждение успешного CI для того же коммита → сборка подписанного release APK → проверка подписи
-и версии → публикация GitHub Release с APK, SHA256SUMS и заметками из CHANGELOG.
+и версии → публикация GitHub Release с APK, SHA256SUMS, update.json и заметками из CHANGELOG.
 
 ## Подпись и обновления
 
@@ -58,7 +58,7 @@ PR-прогон, незавершённый или упавший CI не под
 Обязательные Android-наборы (`smoke,catalog` и `motion,updates`) идут в двух
 параллельных изолированных эмуляторах. Публикация разрешена только после их успеха.
 Полные `visual,adaptive` вынесены в ручной прогон Checks с `full_ui=true` и не
-задерживают каждый релиз. Проверки сборки, lint/JVM, подписи и версии APK обязательны. Assets: `MJReader-X.Y.Z.apk`, `SHA256SUMS`.
+задерживают каждый релиз. Проверки сборки, lint/JVM, подписи и версии APK обязательны. Файлы релиза включают `MJReader-X.Y.Z.apk`, `SHA256SUMS` и `update.json`. Манифест содержит версию, точный URL, размер и SHA-256 проверенного APK для встроенной проверки обновлений.
 
 ## Локальная проверка подписанного APK
 
@@ -90,4 +90,4 @@ python3 scripts/package-release.py
 
 ## OTA updates
 
-The app discovers published entries through the releases list (not `/releases/latest`, which excludes prereleases). Keep tags `vX.Y.Z`, asset names `MJReader-X.Y.Z.apk`, application ID and signing identity stable, and increase the version code. The updater requires GitHub's asset `digest` (`sha256:`); an incomplete release or asset without it is skipped. Publication remains gated by the full CI checks. Existing installations predating OTA support need one manual APK update; subsequent updates can be downloaded from Settings → Updates and confirmed in Android's installer.
+The app reads `update.json` from the latest published release. If that asset is missing, it falls back to the releases list, which also includes prereleases. Older MJReader versions still use the releases list and require GitHub's asset `digest` (`sha256:`). Keep tags `vX.Y.Z`, asset names `MJReader-X.Y.Z.apk`, application ID and signing identity stable, and increase the version code. Publication remains gated by the required CI checks. Existing installations predating OTA support need one manual APK update. Subsequent updates can be downloaded from Settings → Updates and confirmed in Android's installer.

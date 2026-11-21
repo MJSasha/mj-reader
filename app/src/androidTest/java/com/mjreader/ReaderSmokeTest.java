@@ -38,7 +38,7 @@ public class ReaderSmokeTest extends Instrumentation {
             AppUpdates.prefs(context).edit().putBoolean("automatic", false).commit();
             if (updatesOnly) { new UpdateCheck(this).run(updateFixture); result.putString("stream", "PASS: OTA release selection, checksum/signature/version rejection, daily check limit, themed UI and persisted download cancellation\n"); finish(Activity.RESULT_OK, result); return; }
             if (showcaseOnly) { showcase(); result.putString("stream", "PASS: original demonstration screenshots\n"); finish(Activity.RESULT_OK, result); return; }
-            if (motionOnly) { pagesCheck(); result.putString("stream", "PASS: reader controls motion, rapid reversals, anchors, page swipes, edge taps, page slides, phone/spread, light/dark, large fonts and reduced motion\n"); finish(Activity.RESULT_OK, result); return; }
+            if (motionOnly) { startupCheck(context); pagesCheck(); result.putString("stream", "PASS: startup reveal, reader controls motion, rapid reversals, anchors, page swipes, edge taps, page slides, phone/spread, light/dark, large fonts and reduced motion\n"); finish(Activity.RESULT_OK, result); return; }
             if (adaptiveOnly) { narrowScreenCheck(); adaptiveCheck(); pagesCheck(); result.putString("stream", "PASS: narrow 320/360 dp and Flip 7 proportions, RU/EN labels, phone/Fold/tablet resize, grid, reader position/fullscreen, EPUB illustration repair, exact page seams, one/two-page reflow, catalog retention, hover/focus and touch targets\n"); finish(Activity.RESULT_OK, result); return; }
             if (catalogOnly) { new CatalogCheck(this).run(liveCatalog); result.putString("stream", "PASS: OPDS failover, HTTPS EPUB download, cover/chapters import, cancellation/retry, background import, themed UI and recreation\n"); finish(Activity.RESULT_OK, result); return; }
             if (benchmarkOnly) {
@@ -246,13 +246,13 @@ public class ReaderSmokeTest extends Instrumentation {
             if (!prefs.getStringSet("collections.demo-en", java.util.Collections.emptySet()).contains(collection))
                 throw new AssertionError("Collection assignment failed");
             runOnMainSync(() -> invoke(activity, "bookMenu", new Class[]{Books.Book.class}, english));
-            clickSystem("Favorite");
+            clickSystem("Add to favorites");
             if (!prefs.getBoolean("favorite.demo-en", false)) throw new AssertionError("Favorite not saved");
             runOnMainSync(() -> invoke(activity, "bookMenu", new Class[]{Books.Book.class}, english));
             clickSystem("Reading status"); clickSystem("Finished");
             if (!prefs.getString("status.demo-en", "").equals("done")) throw new AssertionError("Reading status not saved");
             runOnMainSync(() -> invoke(activity, "bookMenu", new Class[]{Books.Book.class}, english));
-            clickSystem("Delete"); clickSystem("Delete");
+            clickSystem("Move to Deleted"); clickSystem("Move to Deleted");
             if (!prefs.getBoolean("deleted.demo-en", false)) throw new AssertionError("Delete not saved");
             clickSystem("Undo delete");
             if (prefs.getBoolean("deleted.demo-en", false)) throw new AssertionError("Undo did not restore");
@@ -590,10 +590,19 @@ public class ReaderSmokeTest extends Instrumentation {
             click(screen, "Reading"); waitForIdleSync();
             if (!field(screen, "filter").equals("reading")) throw new AssertionError("Quick reading filter failed");
             runOnMainSync(() -> {
-                prefs.edit().putBoolean("deleted.demo-en", true).commit();
                 setField(screen, "filter", "all"); invoke(screen, "library");
+                invoke(screen, "bookMenu", new Class[]{Books.Book.class}, recent);
+            });
+            clickSystem("Move to Deleted"); clickSystem("Move to Deleted");
+            runOnMainSync(() -> {
+                if (!prefs.getBoolean("deleted.demo-en", false)) throw new AssertionError("Delete preference not updated");
                 View resume = screen.getWindow().getDecorView().findViewWithTag("continue-reading");
                 if (resume != null && resume.getContentDescription().toString().contains("The Quiet Orbit")) throw new AssertionError("Deleted book offered for resume");
+            });
+            clickSystem("Undo delete");
+            runOnMainSync(() -> {
+                View resume = screen.getWindow().getDecorView().findViewWithTag("continue-reading");
+                if (resume == null || !resume.getContentDescription().toString().contains("The Quiet Orbit")) throw new AssertionError("Undo did not restore Continue reading");
             });
         } finally {
             if (activity != null) { MainActivity closing = activity; runOnMainSync(closing::finish); }
@@ -735,6 +744,11 @@ public class ReaderSmokeTest extends Instrumentation {
                                     + " visible=" + visible + " size=" + close.getWidth() + "x" + close.getHeight());
                         if (scroll.getScrollY() <= 0) throw new AssertionError("Dialog body did not scroll");
                         if (close.getContentDescription() == null) throw new AssertionError("Close has no accessible name");
+                        if (mode == 0 || mode == 1) {
+                            Button secondary = dialog[0].getButton(DialogInterface.BUTTON_NEGATIVE);
+                            Button primary = dialog[0].getButton(DialogInterface.BUTTON_POSITIVE);
+                            if (primary.getTop() <= secondary.getBottom()) throw new AssertionError("Compact dialog must stack confirmation last");
+                        }
                         assertTouchTargets(close);
                     });
                     capture("dialog-pinned-close-" + scenario);
@@ -1089,6 +1103,35 @@ public class ReaderSmokeTest extends Instrumentation {
         }
         throw new AssertionError("Pages were not laid out");
     }
+    private void startupCheck(Context context) throws Exception {
+        Intent launch = new Intent(Intent.ACTION_MAIN).setClass(context, MainActivity.class)
+                .addCategory(Intent.CATEGORY_LAUNCHER).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        MainActivity activity = (MainActivity) startActivitySync(launch);
+        try {
+            boolean[] checked = {false};
+            for (int attempt = 0; attempt < 200 && !checked[0]; attempt++) {
+                runOnMainSync(() -> {
+                    StartupBanner banner = (StartupBanner) field(activity, "startup");
+                    if (banner == null || !(field(banner, "reveal") instanceof android.animation.ValueAnimator reveal)) return;
+                    View library = (View) field(activity, "root");
+                    if (!library.isLaidOut()) return;
+                    reveal.pause();
+                    reveal.setCurrentFraction(.5f);
+                    if (banner.getAlpha() <= 0f || banner.getAlpha() >= 1f || banner.getChildAt(0).getScaleX() <= 1f
+                            || library.getParent() != banner.getParent() || library.getAlpha() != 1f || library.getScaleX() != 1f
+                            || library.getImportantForAccessibility() != View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS)
+                        throw new AssertionError("Startup must reveal the positioned library beneath the outgoing emblem");
+                    reveal.end();
+                    if (banner.getParent() != null || field(activity, "startup") != null || field(activity, "root") != library
+                            || library.getImportantForAccessibility() != View.IMPORTANT_FOR_ACCESSIBILITY_AUTO)
+                        throw new AssertionError("Startup must remove the overlay and expose the same library");
+                    checked[0] = true;
+                });
+                if (!checked[0]) Thread.sleep(10);
+            }
+            if (!checked[0]) throw new AssertionError("Missing animated startup reveal");
+        } finally { runOnMainSync(activity::finish); }
+    }
     private void pagesCheck() throws Exception {
         Context context = getTargetContext();
         var prefs = context.getSharedPreferences("reader", 0);
@@ -1234,7 +1277,7 @@ public class ReaderSmokeTest extends Instrumentation {
                 }
                 runOnMainSync(() -> {
                     boolean[] startupReady = {false};
-                    new StartupBanner(large).whenReady(() -> startupReady[0] = true);
+                    new StartupBanner(large).reveal(() -> startupReady[0] = true);
                     if (!startupReady[0]) throw new AssertionError("Startup waits for animation with reduced motion");
                     int anchor = (int) field(large, "anchor");
                     invoke(large, "setFullscreen", new Class[]{boolean.class}, true);

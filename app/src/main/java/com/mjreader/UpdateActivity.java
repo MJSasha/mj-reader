@@ -13,12 +13,15 @@ import android.widget.*;
 /** Downloads persist in Android's DownloadManager across navigation and process death. */
 public class UpdateActivity extends Activity {
     private ReaderOptions theme;
-    private TextView status, details;
+    private TextView status, available, details;
     private ScrollView page;
+    private LinearLayout transfer;
+    private ProgressBar progress;
     private Button action, cancel, check;
     private AppUpdates.Release release;
     private String message = "";
-    private boolean busy, polling, resumed, ready, failed;
+    private boolean busy, checking, polling, resumed, ready, failed;
+    private int percent = -1;
     private int generation;
     private long verifiedId = -1;
     private final SharedPreferences.OnSharedPreferenceChangeListener changed = (prefs, key) -> {
@@ -55,22 +58,60 @@ public class UpdateActivity extends Activity {
             view.setPadding(dp(gutter) + insets.getSystemWindowInsetLeft(), dp(8) + insets.getSystemWindowInsetTop(),
                     dp(gutter) + insets.getSystemWindowInsetRight(), dp(8) + insets.getSystemWindowInsetBottom()); return insets;
         });
-        root.addView(button(tr("Назад", "Back"), false, this::finish));
+        LinearLayout header = new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
+        Button back = button(tr("Назад", "Back"), false, this::finish);
+        back.setText(""); back.setContentDescription(tr("Назад", "Back")); back.setTooltipText(tr("Назад", "Back"));
+        back.setPadding(dp(12), 0, dp(12), 0);
+        back.setBackground(theme.feedback(shape(theme.background(), 16), getResources().getDisplayMetrics().density));
+        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        TextView title = heading(tr("Обновления", "Updates"), 28); title.setPadding(dp(8), 0, 0, 0);
+        header.addView(title, new LinearLayout.LayoutParams(0, -2, 1)); root.addView(header);
         ScrollView scroll = new ScrollView(this); scroll.setId(android.R.id.list); page = scroll; root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        LinearLayout content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL); scroll.addView(content);
-        content.addView(text(tr("Обновления", "Updates"), 30));
-        content.addView(text(tr("Установлена версия ", "Installed version ") + AppUpdates.version(this), 15));
-        status = text("", 18); status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE); content.addView(status);
-        details = text("", 15); content.addView(details);
-        action = button("", true, this::act); content.addView(action);
+        LinearLayout content = column(); content.setPadding(0, dp(8), 0, dp(8)); scroll.addView(content);
+        LinearLayout installed = card(content);
+        installed.setPadding(dp(16), dp(16), dp(16), dp(16));
+        installed.setBackground(theme.feature(getResources().getDisplayMetrics().density, 20));
+        LinearLayout identity = new LinearLayout(this); identity.setGravity(Gravity.CENTER_VERTICAL);
+        ImageView appIcon = new ImageView(this); appIcon.setImageDrawable(new ReaderIcon(this, "update", theme.onSelection()));
+        appIcon.setPadding(dp(12), dp(12), dp(12), dp(12)); appIcon.setBackground(shape(theme.selection(), 12));
+        appIcon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        identity.addView(appIcon, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        LinearLayout version = column(); version.setPadding(dp(12), 0, 0, 0);
+        version.addView(heading("MJReader", 22));
+        version.addView(text(tr("Установлена версия ", "Installed version ") + AppUpdates.version(this), 14, theme.muted()));
+        identity.addView(version, new LinearLayout.LayoutParams(0, -2, 1)); installed.addView(identity);
+        status = text("", 16, theme.muted()); status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        status.setPadding(0, dp(12), 0, dp(12)); content.addView(status);
+        transfer = card(content);
+        available = heading("", 18); available.setPadding(0, 0, 0, dp(8)); transfer.addView(available);
+        progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        progress.setMax(100);
+        progress.setProgressTintList(android.content.res.ColorStateList.valueOf(theme.accent()));
+        progress.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(theme.background()));
+        progress.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        LinearLayout.LayoutParams track = new LinearLayout.LayoutParams(-1, dp(4)); track.topMargin = dp(8); track.bottomMargin = dp(8);
+        transfer.addView(progress, track);
+        action = button("", true, this::act); transfer.addView(action);
         cancel = button(tr("Отменить загрузку", "Cancel download"), false, () -> {
             busy = true; generation++; update();
-            AppUpdates.WORKER.execute(() -> { AppUpdates.cancel(getApplicationContext()); runOnUiThread(() -> {
-                if (isDestroyed()) return; busy = false; ready = false; failed = false; verifiedId = -1;
-                message = tr("Загрузка отменена", "Download cancelled"); update();
-            }); });
-        }); content.addView(cancel);
-        check = button(tr("Проверить обновления", "Check for updates"), false, this::checkNow); content.addView(check);
+            AppUpdates.WORKER.execute(() -> {
+                try {
+                    AppUpdates.cancel(getApplicationContext());
+                    runOnUiThread(() -> {
+                        if (isDestroyed()) return;
+                        busy = false; ready = false; failed = false; verifiedId = -1; percent = -1;
+                        message = tr("Загрузка отменена", "Download cancelled"); update();
+                    });
+                } catch (RuntimeException error) {
+                    error(tr("Не удалось отменить загрузку", "Could not cancel download"));
+                }
+            });
+        }); transfer.addView(cancel);
+        details = text("", 15, theme.muted()); details.setPadding(0, dp(8), 0, dp(12)); transfer.addView(details);
+        LinearLayout checks = card(content);
+        TextView checkHeading = heading(tr("Проверка обновлений", "Update checks"), 18);
+        checkHeading.setPadding(0, 0, 0, dp(8));
+        checks.addView(checkHeading);
         Button automatic = button(tr("Проверять автоматически", "Check automatically"), false, () -> {});
         automatic.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         automatic.setSelected(AppUpdates.prefs(this).getBoolean("automatic", true));
@@ -84,25 +125,51 @@ public class UpdateActivity extends Activity {
             automatic.setSelected(!automatic.isSelected());
             automatic.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, theme.toggleIcon(this, automatic.isSelected()), null);
             AppUpdates.prefs(this).edit().putBoolean("automatic", automatic.isSelected()).apply();
-        }); content.addView(automatic);
-        content.addView(text(tr("Проверка раз в сутки при открытии библиотеки. Загрузка — только по вашему нажатию; установку подтверждает Android.",
-                "Checks once a day when opening the library. Downloads start only when you tap; Android asks you to confirm installation."), 14));
+        }); checks.addView(automatic);
+        TextView hint = text(tr("Проверка раз в сутки при открытии библиотеки. Установку подтверждает Android.",
+                "Checks once a day when you open the library. Android asks you to confirm installation."), 14, theme.muted());
+        hint.setPadding(dp(12), dp(8), dp(12), dp(8)); hint.setBackground(shape(theme.surface(), 12));
+        checks.addView(hint);
+        check = button(tr("Проверить обновления", "Check for updates"), false, this::checkNow); checks.addView(check);
+        Button releases = button("GitHub Releases", false, () -> {
+            try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(AppUpdates.RELEASES))); }
+            catch (ActivityNotFoundException e) { message = tr("Браузер недоступен", "Browser unavailable"); update(); }
+        }); checks.addView(releases);
         setContentView(root); root.requestApplyInsets();
         ReaderOptions.observeWindow(root, () -> { int y = scroll.getScrollY(); render(); page.post(() -> page.scrollTo(0, y)); });
         update();
     }
-    private TextView text(String value, int size) {
-        TextView view = new TextView(this); view.setText(value); view.setTextSize(size); view.setTextColor(theme.ink()); view.setPadding(0, dp(12), 0, dp(12)); return view;
+    private LinearLayout column() {
+        LinearLayout group = new LinearLayout(this); group.setOrientation(LinearLayout.VERTICAL); return group;
+    }
+    private LinearLayout card(LinearLayout parent) {
+        LinearLayout group = column(); group.setPadding(dp(16), dp(16), dp(16), dp(8));
+        group.setBackground(shape(theme.surface(), 20));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.bottomMargin = dp(12);
+        parent.addView(group, params); return group;
+    }
+    private GradientDrawable shape(int color, int radius) {
+        GradientDrawable background = new GradientDrawable(); background.setColor(color); background.setCornerRadius(dp(radius)); return background;
+    }
+    private TextView text(String value, int size, int color) {
+        TextView view = new TextView(this); view.setText(value); view.setTextSize(size); view.setTextColor(color); return view;
+    }
+    private TextView heading(String value, int size) {
+        TextView heading = text(value, size, theme.ink()); heading.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        if (Build.VERSION.SDK_INT >= 28) heading.setAccessibilityHeading(true);
+        return heading;
     }
     private Button button(String label, boolean primary, Runnable click) {
-        Button button = new Button(this); button.setText(label); button.setTextSize(16); button.setAllCaps(false); button.setMinHeight(dp(48));
+        Button button = new Button(this); button.setText(label); button.setTextSize(16); button.setAllCaps(false); button.setMinHeight(dp(primary ? 52 : 48));
         button.setTextColor(primary ? theme.onAccent() : theme.ink()); button.setPadding(dp(16), dp(12), dp(16), dp(12));
-        String icon = label.equals(tr("Назад", "Back")) ? "back" : label.equals(tr("Проверить обновления", "Check for updates")) ? "history" : label.equals(tr("Отменить загрузку", "Cancel download")) ? "close" : null;
+        String icon = label.equals(tr("Назад", "Back")) ? "back"
+                : label.equals(tr("Проверить обновления", "Check for updates")) ? "refresh"
+                : label.equals(tr("Отменить загрузку", "Cancel download")) ? "close"
+                : label.equals("GitHub Releases") ? "external" : null;
         if (icon != null) button.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, icon, primary ? theme.onAccent() : theme.ink()), null, null, null);
         button.setCompoundDrawablePadding(dp(12));
         button.setStateListAnimator(null); button.setElevation(0);
-        GradientDrawable background = new GradientDrawable(); background.setColor(primary ? theme.accent() : theme.surface()); background.setCornerRadius(dp(16));
-        button.setBackground(theme.feedback(background, getResources().getDisplayMetrics().density));
+        button.setBackground(theme.feedback(shape(primary ? theme.accent() : theme.surfaceHigh(), 16), getResources().getDisplayMetrics().density));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.bottomMargin = dp(8); button.setLayoutParams(params);
         button.setOnClickListener(v -> click.run()); return button;
     }
@@ -110,25 +177,42 @@ public class UpdateActivity extends Activity {
     private void update() {
         if (status == null) return;
         if (!status.getText().toString().equals(message)) status.setText(message);
-        String description = release == null ? "" : "MJReader " + release.version() + "\n\n" + release.notes();
+        status.setTextColor(failed ? theme.error() : theme.muted());
+        boolean downloading = downloadId() >= 0;
+        transfer.setVisibility(release != null || downloading ? View.VISIBLE : View.GONE);
+        available.setVisibility(release == null ? View.GONE : View.VISIBLE);
+        available.setText(release == null ? "" : "MJReader " + release.version() + " · " + android.text.format.Formatter.formatShortFileSize(this, release.size()));
+        String description = release == null ? "" : release.notes();
         if (!details.getText().toString().equals(description)) details.setText(description);
-        details.setVisibility(release == null ? View.GONE : View.VISIBLE);
+        details.setVisibility(description.isBlank() ? View.GONE : View.VISIBLE);
+        progress.setVisibility(percent < 0 || ready || failed ? View.GONE : View.VISIBLE);
+        if (percent >= 0) progress.setProgress(percent);
         action.setText(ready ? tr("Установить обновление", "Install update") : failed ? tr("Повторить загрузку", "Retry download") : tr("Скачать обновление", "Download update"));
         action.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, ready ? "check" : "download", theme.onAccent()), null, null, null);
-        action.setVisibility(release == null ? View.GONE : View.VISIBLE);
-        action.setEnabled(!busy && (downloadId() < 0 || ready || failed));
-        cancel.setVisibility(downloadId() >= 0 ? View.VISIBLE : View.GONE); cancel.setEnabled(!busy);
-        check.setEnabled(!busy && downloadId() < 0);
+        action.setVisibility(release != null && (!downloading || ready || failed) ? View.VISIBLE : View.GONE);
+        action.setEnabled(!busy);
+        cancel.setText(ready ? tr("Убрать скачанный APK", "Remove downloaded APK") : tr("Отменить загрузку", "Cancel download"));
+        cancel.setVisibility(downloading ? View.VISIBLE : View.GONE); cancel.setEnabled(!busy);
+        check.setText(checking ? tr("Проверяем…", "Checking…") : tr("Проверить обновления", "Check for updates"));
+        check.setEnabled(!busy && !downloading);
     }
     private void checkNow() {
-        busy = true; generation++; message = tr("Проверяем GitHub Releases…", "Checking GitHub Releases…"); update();
+        checking = true; busy = true; generation++; message = tr("Проверяем GitHub Releases…", "Checking GitHub Releases…"); update();
         Context context = getApplicationContext();
         AppUpdates.WORKER.execute(() -> {
             try {
                 AppUpdates.Release found = AppUpdates.check(context);
-                runOnUiThread(() -> { if (isDestroyed()) return; busy = false; release = found;
+                runOnUiThread(() -> { if (isDestroyed()) return; checking = false; busy = false; failed = false; release = found;
                     message = found == null ? tr("Установлена актуальная версия", "You are up to date") : tr("Доступно обновление", "Update available"); update(); });
-            } catch (Exception e) { error(tr("Не удалось проверить обновления. Проверьте сеть и попробуйте позже.", "Could not check for updates. Check your connection and try again later.")); }
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    if (isDestroyed()) return;
+                    checking = false; busy = false;
+                    message = tr("Не удалось проверить обновления. Проверьте сеть или откройте GitHub Releases.",
+                            "Could not check for updates. Check your connection or open GitHub Releases.");
+                    update();
+                });
+            }
         });
     }
     private void act() {
@@ -144,7 +228,7 @@ public class UpdateActivity extends Activity {
                     runOnUiThread(() -> { if (isDestroyed()) return; busy = false; update(); install(uri); });
                 } else {
                     AppUpdates.download(context, selected);
-                    runOnUiThread(() -> { if (isDestroyed()) return; busy = false; failed = false; verifiedId = -1;
+                    runOnUiThread(() -> { if (isDestroyed()) return; busy = false; failed = false; verifiedId = -1; percent = -1;
                         message = tr("Загрузка… Можно вернуться к чтению.", "Downloading… You can return to reading."); update(); poll(); });
                 }
             } catch (Exception e) { error(tr("Не удалось подготовить обновление. Повторите загрузку.", "Could not prepare the update. Download it again.")); }
@@ -168,6 +252,7 @@ public class UpdateActivity extends Activity {
         polling = true; int request = generation; Context context = getApplicationContext();
         AppUpdates.WORKER.execute(() -> {
             String result; boolean complete = false, failure = false; AppUpdates.Release pending = null;
+            int downloaded = -1;
             try {
                 pending = AppUpdates.decode(AppUpdates.prefs(context).getString("pending", ""));
                 if (AppUpdates.compare(pending.version(), AppUpdates.version(context)) <= 0) {
@@ -176,17 +261,25 @@ public class UpdateActivity extends Activity {
                     if (cursor == null || !cursor.moveToFirst()) throw new java.io.IOException("Download missing");
                     int state = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
                     long done = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
-                    if (done > AppUpdates.MAX_APK) { AppUpdates.cancel(context); throw new java.io.IOException("APK too large"); }
+                    if (done > pending.size()) { AppUpdates.cancel(context); throw new java.io.IOException("APK too large"); }
+                    if (done >= 0 && state != DownloadManager.STATUS_PENDING) downloaded = (int) (done * 100 / pending.size());
                     if (state == DownloadManager.STATUS_SUCCESSFUL) {
+                        runOnUiThread(() -> {
+                            if (isDestroyed() || request != generation) return;
+                            message = tr("Проверяем APK…", "Verifying APK…"); update();
+                        });
                         AppUpdates.verify(context, pending); complete = true; result = tr("Обновление проверено и готово к установке", "Update verified and ready to install");
                     } else if (state == DownloadManager.STATUS_FAILED) { failure = true; result = tr("Загрузка не удалась. Попробуйте снова.", "Download failed. Please retry."); }
                     else if (state == DownloadManager.STATUS_PAUSED) result = tr("Загрузка ожидает сеть или повторную попытку…", "Waiting for a connection or retry…");
-                    else result = tr("Загрузка: ", "Downloading: ") + Math.min(100, done * 100 / pending.size()) + "%";
+                    else result = downloaded < 0 ? tr("Ожидаем загрузку…", "Waiting to download…")
+                            : tr("Загрузка: ", "Downloading: ") + downloaded + "%";
                 }
             } catch (Exception e) { failure = true; result = tr("Проверка обновления не пройдена. Повторите загрузку.", "Update verification failed. Download it again."); }
-            String label = result; boolean verified = complete, rejected = failure; AppUpdates.Release selected = pending;
+            String label = result; boolean verified = complete, rejected = failure; AppUpdates.Release selected = pending; int done = downloaded;
             runOnUiThread(() -> { polling = false; if (isDestroyed() || request != generation) return;
-                release = selected; ready = verified; failed = rejected; if (verified) verifiedId = id; message = label; update(); });
+                if (selected != null || !rejected) release = selected;
+                ready = verified; failed = rejected; percent = done;
+                if (verified) verifiedId = id; message = label; update(); });
         });
     }
     private void error(String label) { runOnUiThread(() -> { if (isDestroyed()) return; busy = false; ready = false; failed = true; message = label; update(); }); }

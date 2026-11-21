@@ -12,7 +12,7 @@ final class ReaderIcon extends Drawable {
 
     ReaderIcon(Context context, String kind, int color) {
         this.kind = kind;
-        size = Math.round(22 * context.getResources().getDisplayMetrics().density);
+        size = Math.round(24 * context.getResources().getDisplayMetrics().density);
         paint.setColor(color);
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(1.7f);
@@ -28,9 +28,9 @@ final class ReaderIcon extends Drawable {
             case "Читаю", "Чтение", "Reading", "Текст", "Text", "Статус чтения", "Reading status" -> "book";
             case "Хочу прочитать", "Want to read", "В планах", "To read" -> "clock";
             case "Прочитано", "Finished", "Сохранить", "Save", "Сохранить заметку", "Save note" -> "check";
-            case "Избранное", "Favorites", "Favorite" -> "star";
+            case "Избранное", "Favorites", "Favorite", "Добавить в избранное", "Убрать из избранного", "Add to favorites", "Remove from favorites" -> "star";
             case "Коллекции", "Collections", "Новая коллекция", "+ Новая коллекция", "+ New collection", "Новая", "New" -> "folder";
-            case "Удалённые", "Deleted", "Удалить", "Delete" -> "trash";
+            case "Удалённые", "Deleted", "Удалить", "Delete", "Переместить в удалённые", "Move to Deleted", "Remove download", "Убрать загрузку" -> "trash";
             case "Название и автор", "Title & author" -> "edit";
             case "Повторный импорт", "Reimport" -> "history";
             case "Сбросить прогресс", "Reset progress", "С начала", "Read again", "Вернуть", "Restore", "Отменить удаление", "Undo delete", "Вернуться к месту", "Return to previous place" -> "history";
@@ -46,7 +46,9 @@ final class ReaderIcon extends Drawable {
             case "Полный экран", "Full screen" -> "expand";
             case "Добавить книгу", "Add book" -> "plus";
             case "Найти книги", "Discover" -> "globe";
-            case "Скачать", "Download" -> "download";
+            case "Скачать", "Download", "Загрузки", "Downloads" -> "download";
+            case "Обновления", "Updates" -> "update";
+            case "Помощь", "Help", "Приложение", "Application" -> "info";
             case "Название книги", "Book title" -> "book";
             case "Автор", "Author" -> "edit";
             case "Автоматически", "Automatic", "flibusta.site", "flibusta.is" -> "globe";
@@ -66,7 +68,14 @@ final class ReaderIcon extends Drawable {
         canvas.scale(bounds.width() / 24f, bounds.height() / 24f);
         switch (kind) {
             case "download" -> { path(canvas, 12, 3, 12, 16, 7, 11); line(canvas, 12, 16, 17, 11); path(canvas, 3, 16, 3, 21, 21, 21, 21, 16); }
+            case "update" -> { box(canvas, 6, 2, 18, 22); path(canvas, 12, 6, 12, 15, 9, 12); line(canvas, 12, 15, 15, 12); }
+            case "refresh" -> { canvas.drawArc(4, 4, 20, 20, 0, 315, false, paint); path(canvas, 20, 4, 20, 10, 14, 10); }
+            case "external" -> { path(canvas, 13, 4, 20, 4, 20, 11); line(canvas, 20, 4, 10, 14); path(canvas, 10, 4, 4, 4, 4, 20, 20, 20, 20, 14); }
             case "back" -> { path(canvas, 13, 5, 6, 12, 13, 19); line(canvas, 6, 12, 21, 12); }
+            case "forward" -> { path(canvas, 11, 5, 18, 12, 11, 19); line(canvas, 3, 12, 18, 12); }
+            case "next" -> path(canvas, 9, 6, 15, 12, 9, 18);
+            case "more" -> { for (int y : new int[]{5, 12, 19}) canvas.drawCircle(12, y, 1, paint); }
+            case "info" -> { canvas.drawCircle(12, 12, 9, paint); line(canvas, 12, 11, 12, 17); canvas.drawCircle(12, 7.5f, .5f, paint); }
             case "globe" -> { canvas.drawCircle(12, 12, 9, paint); canvas.drawOval(8, 3, 16, 21, paint); line(canvas, 3, 12, 21, 12); }
             case "settings" -> {
                 canvas.drawCircle(12, 12, 7, paint); canvas.drawCircle(12, 12, 2.5f, paint);

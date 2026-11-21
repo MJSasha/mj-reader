@@ -20,10 +20,27 @@ final class CatalogCheck {
     private final Instrumentation test;
     private final Context context;
     private final java.util.concurrent.atomic.AtomicInteger brokenTransfers = new java.util.concurrent.atomic.AtomicInteger();
+    private boolean pagingRetryObserved;
+    private final java.util.concurrent.atomic.AtomicBoolean failNextPage = new java.util.concurrent.atomic.AtomicBoolean(true);
+    private final Map<String, List<String>> rangeRequests = new ConcurrentHashMap<>();
     private final java.util.concurrent.atomic.AtomicInteger slowCatalog = new java.util.concurrent.atomic.AtomicInteger();
     private final java.util.concurrent.atomic.AtomicInteger transientRequests = new java.util.concurrent.atomic.AtomicInteger();
     CatalogCheck(Instrumentation test) { this.test = test; context = test.getTargetContext(); }
     void run(boolean live) throws Exception {
+        Notification notification = BookDownloadService.notification(context, "Orbit", 250_000, 1_000_000, 50_000);
+        String details = notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString();
+        require("Orbit".contentEquals(notification.extras.getCharSequence(Notification.EXTRA_TITLE))
+                && details.contains("25%") && details.contains("≈ 15") && notification.contentIntent != null
+                && Notification.CATEGORY_PROGRESS.equals(notification.category) && !notification.extras.getBoolean(Notification.EXTRA_SHOW_WHEN),
+                "Download notification shows the book, actual progress, estimated time and navigation");
+        if (android.os.Build.VERSION.SDK_INT >= 36) {
+            require(Notification.Builder.recoverBuilder(context, notification).getStyle() instanceof Notification.ProgressStyle progress
+                    && progress.getProgress() == 25 && progress.getProgressTrackerIcon() != null && !progress.isProgressIndeterminate(),
+                    "Android 16 download notification uses the native progress style");
+            Notification preparing = BookDownloadService.notification(context, null, 0, -1, 0);
+            require(Notification.Builder.recoverBuilder(context, preparing).getStyle() instanceof Notification.ProgressStyle progress
+                    && progress.isProgressIndeterminate(), "Unknown download size leaves native progress indeterminate");
+        }
         String before = context.getSharedPreferences("reader", 0).getString("options", "{}"), catalogBefore = context.getSharedPreferences("reader", 0).getString("catalog", "auto");
         byte[] epub = epub(); String original = "Привет из каталога. Hello from the catalog. " + System.currentTimeMillis();
         byte[] slow = (original + "\n" + "Тестовая книга. Original story.\n".repeat(16000)).getBytes(StandardCharsets.UTF_8);
@@ -137,8 +154,16 @@ final class CatalogCheck {
                 long pagesUntil = System.currentTimeMillis() + 8000;
                 while (((List<?>) field(screen, "entries")).size() < 3 && System.currentTimeMillis() < pagesUntil) {
                     ListView list = (ListView) field(screen, "resultsList");
-                    test.runOnMainSync(() -> list.smoothScrollBy(700, 200)); Thread.sleep(300);
+                    test.runOnMainSync(() -> {
+                        if ((boolean) uncheckedField(screen, "pagingFailed")) {
+                            Button retry = (Button) uncheckedField(screen, "pagingRetry");
+                            require(retry.getVisibility() == View.VISIBLE && retry.performClick(), "Retry a failed next page");
+                            pagingRetryObserved = true;
+                        } else list.smoothScrollBy(700, 200);
+                    });
+                    Thread.sleep(300);
                 }
+                require(pagingRetryObserved, "Pagination failure exposes a Retry action");
                 require(((List<?>) field(screen, "entries")).size() == 3 && field(screen, "root") == listRoot, "Infinite paging appends without rebuilding screen");
                 require(((Flibusta.Entry) ((List<?>) field(screen, "entries")).get(0)).details().downloads() == 5000, "New pages participate in download sorting");
                 test.runOnMainSync(() -> ((ListView) uncheckedField(screen, "resultsList")).setSelection(0)); test.waitForIdleSync(); capture("catalog-results-" + theme);
@@ -163,13 +188,25 @@ final class CatalogCheck {
                         });
                         String id = waitJob(first.url()); jobs.add(id);
                         complete = waitState(id, "complete", 20000);
+                        require(!context.getSharedPreferences("reader", 0).getBoolean("catalog.notificationsRequested", false),
+                                "Closing the catalog immediately never opens a notification permission prompt");
                     } finally { releaseCatalogWorker.countDown(); }
-                    if (android.os.Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
-                            != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                        test.getUiAutomation().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK);
-                        test.waitForIdleSync();
-                    }
-                    CatalogActivity taskScreen = (CatalogActivity) test.startActivitySync(new Intent(context, CatalogActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("downloads", true));
+                    String interruptedUrl = origin + "/restore.txt";
+                    String orphan = BookDownloads.create(context, new Flibusta.Entry("Interrupted", "", "", interruptedUrl, "txt", true));
+                    jobs.add(orphan);
+                    byte[] prefix = "First".getBytes(StandardCharsets.UTF_8);
+                    Files.write(new File(BookDownloads.dir(context, orphan), "book.part").toPath(), prefix);
+                    BookDownloads.save(context, BookDownloads.get(context, orphan).put("state", "downloading")
+                            .put("partialUrl", interruptedUrl).put("partialETag", "\"book-v1\"")
+                            .put("partialTotal", "First edition restore.".length()));
+                    CatalogActivity taskScreen = (CatalogActivity) test.startActivitySync(new Intent(context, CatalogActivity.class)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+                            .putExtra(CatalogActivity.EXTRA_DOWNLOADS, true));
+                    JSONObject restoredTransfer = waitState(orphan, "complete", 20000);
+                    imported.add(restoredTransfer.getString("book"));
+                    require(List.of("bytes=5-/\"book-v1\"").equals(rangeRequests.get("/restore.txt"))
+                            && new Books(context).list().stream().anyMatch(b -> b.id().equals(restoredTransfer.optString("book"))
+                            && b.text().equals("First edition restore.")), "Opening Downloads recovers a validated partial after process loss");
                     String bookId = complete.getString("book"); imported.add(bookId);
                     Books.Book book = new Books(context).list().stream().filter(b -> b.id().equals(bookId)).findFirst().orElseThrow();
                     require(book.title().equals("Орбита из каталога") && book.chapters().size() == 2 && book.cover() != null, "EPUB title, cover and chapters imported");
@@ -179,6 +216,20 @@ final class CatalogCheck {
                     JSONObject recovered = waitState(brokenId, "complete", 20000); imported.add(recovered.getString("book"));
                     require(brokenTransfers.get() == 2 && new Books(context).list().stream().anyMatch(b -> b.id().equals(recovered.optString("book"))
                             && b.text().equals("The lighthouse transfer recovered.")), "Truncated transfer retries from zero without duplicated bytes");
+                    for (String mode : List.of("resume", "replace", "invalid")) {
+                        var entry = new Flibusta.Entry(mode, "", "", origin + "/" + mode + ".txt", "txt", true);
+                        String id = BookDownloads.create(context, entry); jobs.add(id);
+                        test.runOnMainSync(() -> BookDownloadService.command(context, "start", id));
+                        JSONObject result = waitState(id, "complete", 20000);
+                        imported.add(result.getString("book"));
+                        String expected = (mode.equals("replace") ? "Fresh" : "First") + " edition " + mode + ".";
+                        require(new Books(context).list().stream().anyMatch(b -> b.id().equals(result.optString("book"))
+                                && b.text().equals(expected)), "No mixed editions or skipped bytes after " + mode);
+                        List<String> seen = rangeRequests.get("/" + mode + ".txt");
+                        List<String> expectedRequests = mode.equals("invalid") ? List.of("", "bytes=5-/\"book-v1\"", "") : List.of("", "bytes=5-/\"book-v1\"");
+                        require(expectedRequests.equals(seen), "Validated range requests for " + mode + ": " + seen);
+                        require(!new File(BookDownloads.dir(context, id), "book.part").exists(), "Imported partial cleaned");
+                    }
                     var fallback = new Flibusta.Entry("Format fallback", "", "", origin + "/invalid.epub", "epub", true,
                             List.of(new Flibusta.Acquisition(fb2Entry.url(), fb2Entry.format())));
                     String fb2Id = BookDownloads.create(context, new Flibusta.Entry(fallback.title(), "", "",
@@ -191,6 +242,11 @@ final class CatalogCheck {
                             && b.title().equals("Маяк из FB2") && b.text().contains("Мира нашла сигнал.")),
                             "Invalid EPUB falls back to a persisted FB2 acquisition and imports the ZIP");
                     Thread.sleep(1300); capture("catalog-complete");
+                    test.runOnMainSync(() -> {
+                        View ready = taskScreen.getWindow().getDecorView();
+                        require(ready.findViewWithTag("download-status") != null && ready.findViewWithTag("download-progress") == null,
+                                "Completed cards show status without a transfer meter");
+                    });
                     var slowEntry = failover.feed().entries().get(1); String slowId = BookDownloads.create(context, slowEntry); jobs.add(slowId);
                     test.runOnMainSync(() -> BookDownloadService.command(context, "start", slowId));
                     long deadline = System.currentTimeMillis() + 10000;
@@ -198,7 +254,18 @@ final class CatalogCheck {
                     require(BookDownloads.get(context, slowId).optLong("done") > 0, "Stream progress persisted");
                     test.runOnMainSync(() -> BookDownloadService.command(context, "cancel", slowId)); waitState(slowId, "cancelled", 10000);
                     test.runOnMainSync(() -> BookDownloadService.command(context, "start", slowId));
-                    test.runOnMainSync(taskScreen::finish); JSONObject retry = waitState(slowId, "complete", 20000); imported.add(retry.getString("book"));
+                    Instrumentation.ActivityMonitor readerMonitor = test.addMonitor(MainActivity.class.getName(), null, false);
+                    test.runOnMainSync(() -> invoke(taskScreen, "readDownload", new Class[]{JSONObject.class}, complete));
+                    MainActivity reader = (MainActivity) test.waitForMonitorWithTimeout(readerMonitor, 10000);
+                    test.removeMonitor(readerMonitor);
+                    require(reader != null, "Read opens MJReader from standalone Downloads");
+                    try {
+                        long readingDeadline = System.currentTimeMillis() + 10000;
+                        while (field(reader, "reading") == null && System.currentTimeMillis() < readingDeadline) Thread.sleep(50);
+                        require(field(reader, "reading") != null && field(reader, "current") instanceof Books.Book opened
+                                && opened.id().equals(bookId), "Read opens the imported book with its saved ID");
+                    } finally { test.runOnMainSync(reader::finish); }
+                    JSONObject retry = waitState(slowId, "complete", 20000); imported.add(retry.getString("book"));
                     require(new Books(context).list().stream().anyMatch(b -> b.text().contains(original)), "Background retry and full text import");
                 } else {
                     Instrumentation.ActivityMonitor monitor = test.addMonitor(CatalogActivity.class.getName(), null, false); test.runOnMainSync(screen::recreate);
@@ -223,7 +290,30 @@ final class CatalogCheck {
     private void serve(SSLSocket socket, String origin, byte[] epub, byte[] slow) {
         try (socket) {
             BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII)); String line = reader.readLine();
-            if (line == null) return; String path = line.split(" ")[1]; while ((line = reader.readLine()) != null && !line.isEmpty()) { }
+            if (line == null) return;
+            String path = line.split(" ")[1], range = "", validator = "";
+            while ((line = reader.readLine()) != null && !line.isEmpty()) {
+                int colon = line.indexOf(':');
+                if (colon <= 0) continue;
+                String header = line.substring(0, colon);
+                if (header.equalsIgnoreCase("Range")) range = line.substring(colon + 1).trim();
+                if (header.equalsIgnoreCase("If-Range")) validator = line.substring(colon + 1).trim();
+            }
+            if (Set.of("/resume.txt", "/replace.txt", "/invalid.txt", "/restore.txt").contains(path)) {
+                String mode = path.substring(1, path.length() - 4);
+                List<String> requests = rangeRequests.computeIfAbsent(path, ignored -> new CopyOnWriteArrayList<>());
+                requests.add(range.isEmpty() ? "" : range + "/" + validator);
+                boolean first = requests.size() == 1 && !mode.equals("restore"), replace = mode.equals("replace") && !first;
+                byte[] body = ((replace ? "Fresh" : "First") + " edition " + mode + ".").getBytes(StandardCharsets.UTF_8);
+                boolean ranged = !range.isEmpty() && !replace;
+                int offset = ranged ? 5 : 0;
+                String rangeHeader = ranged ? "Content-Range: bytes " + (mode.equals("invalid") ? 4 : offset) + "-" + (body.length - 1) + "/" + body.length + "\r\n" : "";
+                OutputStream out = socket.getOutputStream();
+                out.write(("HTTP/1.1 " + (ranged ? "206 Partial Content" : "200 OK") + "\r\nContent-Type: text/plain\r\n"
+                        + "ETag: " + (replace ? "\"book-v2\"" : "\"book-v1\"") + "\r\n" + rangeHeader
+                        + "Content-Length: " + (body.length - offset) + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+                out.write(body, offset, first ? 5 : body.length - offset); out.flush(); return;
+            }
             if (path.equals("/redirect/opds")) {
                 socket.getOutputStream().write(("HTTP/1.1 302 Found\r\nLocation: /redirected/opds/search?query=original\r\n"
                         + "Content-Length: 0\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
@@ -231,6 +321,7 @@ final class CatalogCheck {
             }
             if (path.startsWith("/stall/")) { slowCatalog.incrementAndGet(); Thread.sleep(5000); }
             int status = path.startsWith("/bad/") || path.startsWith("/flaky/") && transientRequests.getAndIncrement() < 2 ? 503 : 200;
+            if (path.contains("page=2") && path.startsWith("/good/") && failNextPage.getAndSet(false)) status = 404;
             byte[] data = path.equals("/broken.txt") ? "The lighthouse transfer recovered.".getBytes(StandardCharsets.UTF_8) : path.equals("/book.fb2") ? fb2() : path.equals("/book.epub") ? epub : path.equals("/slow.txt") ? slow : feed(origin, path.contains("page=2")).getBytes(StandardCharsets.UTF_8);
             if (path.startsWith("/redirected/opds/")) data = ("<feed xmlns='http://www.w3.org/2005/Atom'>"
                     + "<link rel='next' href='?page=2'/><entry><title>Redirected</title>"

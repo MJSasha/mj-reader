@@ -16,6 +16,7 @@ import java.util.concurrent.*;
 
 /** Flibusta's OPDS catalog and direct book downloads, using the reader's native controls. */
 public class CatalogActivity extends Activity {
+    static final String EXTRA_DOWNLOADS = "downloads", EXTRA_READ_BOOK = "readDownload";
     private ReaderOptions theme;
     private SharedPreferences prefs;
     private LinearLayout root, content;
@@ -23,8 +24,9 @@ public class CatalogActivity extends Activity {
     private TextView loadingLabel, resultStatus, pagingLabel;
     private LinearLayout pagingFooter;
     private ProgressBar pagingSpinner;
+    private Button pagingRetry;
     private ListView resultsList, downloadsList;
-    private boolean loadingMore, pagingFailed, refreshing;
+    private boolean loadingMore, pagingFailed, refreshing, recoverOnRefresh;
     private final Set<String> loadedPages = new HashSet<>();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -34,6 +36,7 @@ public class CatalogActivity extends Activity {
     private int catalogItem = -1, catalogTop;
     private int resultColumns = 1;
     private int downloadRow, downloadTop;
+    private boolean askDownloadNotifications;
     private String pendingUrl = "";
     private record Retained(List<Flibusta.Entry> entries, Set<String> pages, List<JSONObject> jobs,
             String url, String next, String title, String message, String pending) {}
@@ -52,7 +55,10 @@ public class CatalogActivity extends Activity {
                     for (JSONObject job : updated) {
                         String id = job.optString("id");
                         if (BookDownloadService.active(id)) active.add(id);
+                        else if (recoverOnRefresh && hasWindowFocus() && BookDownloads.pending(job.optString("state")))
+                            command("recover", id);
                     }
+                    if (hasWindowFocus()) recoverOnRefresh = false;
                     boolean structure = jobs.isEmpty() != updated.isEmpty();
                     boolean changed = !active.equals(activeJobs) || !jobs.toString().equals(updated.toString());
                     jobs = updated; activeJobs = active;
@@ -64,7 +70,7 @@ public class CatalogActivity extends Activity {
     };
     @Override public void onCreate(Bundle state) {
         super.onCreate(state); prefs = getSharedPreferences("reader", MODE_PRIVATE); theme = ReaderOptions.load(prefs, null);
-        downloads = getIntent().getBooleanExtra("downloads", false);
+        downloads = getIntent().getBooleanExtra(EXTRA_DOWNLOADS, false);
         String restoreUrl = "";
         if (state != null) {
             query = state.getString("query", ""); authors = state.getBoolean("authors"); downloads = state.getBoolean("downloads"); restoreUrl = state.getString("url", "");
@@ -82,6 +88,15 @@ public class CatalogActivity extends Activity {
         setResult(RESULT_OK); render();
         if (!restoreUrl.isEmpty() && !downloads) load(restoreUrl, false);
     }
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (intent.getBooleanExtra(EXTRA_DOWNLOADS, false)) switchTab(true);
+    }
+    @Override public void onWindowFocusChanged(boolean focused) {
+        super.onWindowFocusChanged(focused);
+        if (focused && askDownloadNotifications) root.post(this::maybeRequestDownloadNotifications);
+    }
     @Override protected void onSaveInstanceState(Bundle state) {
         if (input != null && !downloads) query = input.getText().toString();
         state.putString("query", query); state.putBoolean("authors", authors); state.putBoolean("downloads", downloads);
@@ -95,7 +110,8 @@ public class CatalogActivity extends Activity {
     }
     private void rememberScroll() {
         if (downloads && downloadsList != null && downloadsList.isAttachedToWindow() && downloadsList.getChildCount() > 0) {
-            downloadRow = downloadsList.getFirstVisiblePosition(); downloadTop = downloadsList.getChildAt(0).getTop();
+            downloadRow = downloadsList.getFirstVisiblePosition() * catalogColumns();
+            downloadTop = downloadsList.getChildAt(0).getTop();
         }
         if (!downloads && resultsList != null && resultsList.isAttachedToWindow() && resultsList.getChildCount() > 0) {
             int row = resultsList.getFirstVisiblePosition();
@@ -106,7 +122,7 @@ public class CatalogActivity extends Activity {
     private int catalogColumns() {
         return resultColumns;
     }
-    @Override protected void onResume() { super.onResume(); handler.post(refresh); }
+    @Override protected void onResume() { super.onResume(); recoverOnRefresh = true; handler.post(refresh); }
     @Override protected void onPause() { handler.removeCallbacks(refresh); super.onPause(); }
     @Override protected void onDestroy() { generation++; if (task != null) task.cancel(true); worker.shutdownNow(); handler.removeCallbacksAndMessages(null); super.onDestroy(); }
     @android.annotation.SuppressLint("GestureBackNavigation")
@@ -138,7 +154,8 @@ public class CatalogActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 28) title.setAccessibilityHeading(true);
         mast.addView(title, weight());
         space(mast);
-        mast.addView(iconButton(tr("Настройки каталога", "Catalog settings"), "settings", this::catalogSettings)); root.addView(mast);
+        if (!downloads) mast.addView(iconButton(tr("Настройки каталога", "Catalog settings"), "settings", this::catalogSettings));
+        root.addView(mast);
         View mastDivider = new View(this); mastDivider.setBackgroundColor(theme.surface());
         root.addView(mastDivider, new LinearLayout.LayoutParams(-1, dp(1))); gap(root, 16);
         content = column(); root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -238,11 +255,16 @@ public class CatalogActivity extends Activity {
             card.addView(actions, match());
         }
         card.setBackground(theme.feedback(shape(theme.surface(), 20), getResources().getDisplayMetrics().density));
-        card.setOnClickListener(v -> {
-            if (entry.book()) bookDetails(entry);
-            else { history.push(currentUrl.isEmpty() ? base() : currentUrl); load(entry.url(), false); }
-        });
-        card.setFocusable(true); return card;
+        if (entry.book()) {
+            card.setOnClickListener(v -> bookDetails(entry));
+            // The labeled Details button is the keyboard and accessibility target for this action.
+            card.setFocusable(false);
+            card.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        } else {
+            card.setOnClickListener(v -> { history.push(currentUrl.isEmpty() ? base() : currentUrl); load(entry.url(), false); });
+            card.setFocusable(true);
+        }
+        return card;
     }
     private void rememberQuery() { if (input != null && !downloads) query = input.getText().toString().trim(); }
     private void searchOptions() {
@@ -256,12 +278,12 @@ public class CatalogActivity extends Activity {
         catch (Exception error) { error(error); }
     }
     private void load(String address, boolean append) {
-        if (!append) rememberQuery();
-        ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(root.getWindowToken(), 0);
         if (append) {
             if (loadingMore || next.isEmpty()) return;
             loadingMore = true; pagingFailed = false; updatePaging();
         } else {
+            rememberQuery();
+            ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(root.getWindowToken(), 0);
             if (task != null) task.cancel(true);
             loadingMore = false; pagingFailed = false;
             pendingUrl = address; busy = true; message = tr("Открываем каталог…", "Opening catalog…"); render();
@@ -309,16 +331,17 @@ public class CatalogActivity extends Activity {
     private static String entryKey(Flibusta.Entry entry) { return entry.url().isEmpty() ? entry.title() + "\n" + entry.author() : entry.url(); }
     private void attachPaging(ListView list) {
         resultsList = list;
-        pagingFooter = row(); pagingFooter.setGravity(Gravity.CENTER); pagingFooter.setPadding(dp(12), dp(12), dp(12), dp(16));
+        pagingFooter = getResources().getConfiguration().fontScale >= 1.6f ? column() : row(); pagingFooter.setGravity(Gravity.CENTER); pagingFooter.setPadding(dp(12), dp(12), dp(12), dp(16));
         pagingSpinner = new ProgressBar(this); pagingSpinner.setIndeterminateTintList(ColorStateList.valueOf(theme.accent()));
         pagingFooter.addView(pagingSpinner, new LinearLayout.LayoutParams(dp(24), dp(24))); space(pagingFooter);
         pagingLabel = text("", 13, theme.muted()); pagingLabel.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE); pagingFooter.addView(pagingLabel);
+        pagingRetry = control(tr("Повторить", "Retry"), "refresh", false, () -> load(next, true));
+        pagingFooter.addView(pagingRetry);
         list.addFooterView(pagingFooter, null, false); updatePaging();
         list.setOnScrollListener(new AbsListView.OnScrollListener() {
             boolean scrolling;
             public void onScrollStateChanged(AbsListView view, int state) {
                 scrolling = state != SCROLL_STATE_IDLE;
-                if (state == SCROLL_STATE_TOUCH_SCROLL && !loadingMore) pagingFailed = false;
                 if (scrolling) maybeLoad(view);
             }
             public void onScroll(AbsListView view, int first, int visible, int total) { if (scrolling) maybeLoad(view); }
@@ -339,7 +362,8 @@ public class CatalogActivity extends Activity {
         if (pagingFooter == null) return;
         pagingFooter.setVisibility(loadingMore || pagingFailed ? View.VISIBLE : View.GONE);
         pagingSpinner.setVisibility(loadingMore ? View.VISIBLE : View.GONE);
-        pagingLabel.setText(pagingFailed ? tr("Не удалось загрузить. Прокрутите, чтобы повторить.", "Could not load. Scroll again to retry.") : tr("Загружаем следующие книги…", "Loading more books…"));
+        pagingLabel.setText(pagingFailed ? tr("Страница недоступна", "Page unavailable") : tr("Загружаем следующие книги…", "Loading more books…"));
+        pagingRetry.setVisibility(pagingFailed ? View.VISIBLE : View.GONE);
     }
     private boolean valid(int token) { return !isDestroyed() && token == generation; }
     private void bookDetails(Flibusta.Entry entry) {
@@ -379,8 +403,17 @@ public class CatalogActivity extends Activity {
         try { BookDownloadService.enqueue(this, entry); }
         catch (RuntimeException error) { error(error); return; }
         switchTab(true);
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+        askDownloadNotifications = true;
+        root.post(this::maybeRequestDownloadNotifications);
+    }
+    private void maybeRequestDownloadNotifications() {
+        if (!askDownloadNotifications || !downloads || !hasWindowFocus() || isFinishing() || isDestroyed()) return;
+        askDownloadNotifications = false;
+        if (Build.VERSION.SDK_INT >= 33 && !prefs.getBoolean("catalog.notificationsRequested", false)
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            prefs.edit().putBoolean("catalog.notificationsRequested", true).apply();
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 5);
+        }
     }
     private void catalogSettings() {
         rememberQuery(); rememberScroll();
@@ -440,45 +473,115 @@ public class CatalogActivity extends Activity {
         });
     }
     private void downloadsPage() {
-        if (jobs.isEmpty()) { empty(tr("Книги скоро будут здесь", "Your books will appear here"), tr("Выберите книгу в каталоге и нажмите «Скачать». Готовая книга появится в библиотеке автоматически.", "Choose a book in the catalog and tap Download. Finished books are added to your library automatically.")); return; }
-        ListView list = list(); downloadsList = list; adapter = new BaseAdapter() {
+        if (jobs.isEmpty()) {
+            empty(tr("Загрузок пока нет", "No downloads yet"), tr("Откройте книгу в каталоге и нажмите «Скачать».", "Choose a book in the catalog and tap Download."));
+            return;
+        }
+        ListView list = list(); downloadsList = list;
+        int columns = catalogColumns();
+        adapter = new BaseAdapter() {
             public boolean hasStableIds() { return true; }
-            public int getCount() { return jobs.size(); } public Object getItem(int i) { return jobs.get(i); } public long getItemId(int i) { return jobs.get(i).optString("id").hashCode(); }
-            public View getView(int i, View convert, ViewGroup parent) {
-                JSONObject job = jobs.get(i); String id = job.optString("id"), state = job.optString("state"); boolean active = BookDownloadService.active(id);
-                if (!active && (state.equals("queued") || state.equals("downloading") || state.equals("importing"))) state = "cancelled";
-                if (active && (state.equals("error") || state.equals("cancelled"))) state = "queued";
-                String identity = id + ":" + state + ":" + active + ":" + job.optString("error");
-                if (convert != null && identity.equals(convert.getTag())) { updateDownload(convert, job, active); return convert; }
-                boolean complete = state.equals("complete"); LinearLayout card = card(); card.addView(text(job.optString("title"), 18, theme.ink()));
-                if (!job.optString("author").isEmpty()) { gap(card, 6); card.addView(text(job.optString("author"), 14, theme.muted())); } gap(card, 12);
-                String status = switch (state) { case "complete" -> tr("В библиотеке", "In your library"); case "cancelled" -> tr("Загрузка прервана", "Download interrupted"); case "error" -> tr("Не удалось скачать", "Download failed"); case "importing" -> tr("Добавляем в библиотеку…", "Adding to library…"); case "queued" -> tr("В очереди", "Queued"); default -> tr("Скачиваем", "Downloading"); };
-                card.addView(text(status, 13, theme.accent())); gap(card, 8);
-                ProgressBar progress = new ProgressBar(CatalogActivity.this, null, android.R.attr.progressBarStyleHorizontal);
-                progress.setProgressTintList(ColorStateList.valueOf(theme.accent())); progress.setIndeterminateTintList(ColorStateList.valueOf(theme.accent()));
-                progress.setTag("download-progress"); progress.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-                if (!complete) { card.addView(progress, new LinearLayout.LayoutParams(-1, dp(5))); gap(card, 8); }
-                else { progress.setVisibility(View.GONE); card.addView(progress); }
-                TextView amount = text("", 12, theme.muted()); amount.setTag("download-amount"); card.addView(amount);
-                if (state.equals("error")) { gap(card, 8); card.addView(text(job.optString("error"), 13, theme.muted())); }
-                gap(card, 12); LinearLayout buttons = row();
-                if (complete) buttons.addView(control(tr("Библиотека", "Library"), "library", true, () -> { if (isTaskRoot()) startActivity(new Intent(CatalogActivity.this, MainActivity.class)); setResult(RESULT_OK); finish(); }), weight());
-                else buttons.addView(control(active ? tr("Отменить", "Cancel") : tr("Заново", "Retry"), active ? "close" : "download", false, () -> command(active ? "cancel" : "start", id)), weight());
-                space(buttons); buttons.addView(control(tr("Убрать", "Remove"), "trash", false, () -> new ReaderDialogs(CatalogActivity.this, theme).setTitle(tr("Убрать загрузку?", "Remove download?"))
-                        .setMessage(tr("Добавленная в библиотеку книга останется.", "The imported book will stay in your library.")).setNegativeButton(tr("Отмена", "Cancel"), null).setPositiveButton(tr("Убрать", "Remove"), (d, w) -> command("delete", id)).show()), weight());
-                card.addView(buttons); View wrapper = wrap(card); wrapper.setTag(identity); updateDownload(wrapper, job, active); return wrapper;
+            public int getCount() { return (jobs.size() + columns - 1) / columns; }
+            public JSONObject getItem(int row) { return jobs.get(row * columns); }
+            public long getItemId(int row) { return getItem(row).optString("id").hashCode(); }
+            public View getView(int row, View convert, ViewGroup parent) {
+                LinearLayout line = convert == null ? row() : (LinearLayout) convert;
+                line.setGravity(Gravity.TOP);
+                line.setPadding(0, 0, 0, dp(12));
+                for (int col = 0; col < columns; col++) {
+                    int index = row * columns + col;
+                    FrameLayout cell;
+                    if (col >= line.getChildCount()) {
+                        cell = new FrameLayout(CatalogActivity.this);
+                        LinearLayout.LayoutParams params = weight();
+                        if (col > 0) params.setMarginStart(dp(12));
+                        line.addView(cell, params);
+                    } else cell = (FrameLayout) line.getChildAt(col);
+                    if (index < jobs.size()) bindDownload(cell, jobs.get(index));
+                    else cell.removeAllViews();
+                }
+                return line;
             }
-        }; list.setAdapter(adapter); content.addView(list, new LinearLayout.LayoutParams(-1, 0, 1));
-        list.setSelectionFromTop(downloadRow, downloadTop);
+        };
+        list.setAdapter(adapter); content.addView(list, new LinearLayout.LayoutParams(-1, 0, 1));
+        list.setSelectionFromTop(downloadRow / columns, downloadTop);
     }
-    private void updateDownload(View card, JSONObject job, boolean active) {
+    private void bindDownload(FrameLayout cell, JSONObject job) {
+        String id = job.optString("id"), state = job.optString("state");
+        boolean active = BookDownloadService.active(id);
+        if (!active && BookDownloads.pending(state)) state = "interrupted";
+        if (active && (state.equals("error") || state.equals("cancelled"))) state = "queued";
+        String identity = id + ":" + state + ":" + job.optString("downloadFormat") + ":" + job.optString("error");
+        LinearLayout card = (LinearLayout) cell.getChildAt(0);
+        if (card == null || !identity.equals(card.getTag())) {
+            cell.removeAllViews();
+            card = card();
+            card.setBackground(shape(theme.surfaceHigh(), 16)); card.setTag(identity);
+            TextView title = text(job.optString("title"), 18, theme.ink()); title.setTypeface(Typeface.DEFAULT_BOLD);
+            card.addView(title); gap(card, 6);
+            String author = job.optString("author"), format = job.optString("downloadFormat", job.optString("format")).toUpperCase(Locale.ROOT);
+            card.addView(text(author.isEmpty() ? format : author + " · " + format, 14, theme.muted())); gap(card, 10);
+            TextView status = text("", 14, state.equals("error") ? theme.error() : theme.muted());
+            status.setTag("download-status");
+            if (!state.equals("downloading")) status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+            card.addView(status);
+            if (state.equals("downloading")) {
+                ProgressBar display = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+                display.setTag("download-progress");
+                display.setProgressTintList(ColorStateList.valueOf(theme.accent()));
+                display.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                card.addView(display, new LinearLayout.LayoutParams(-1, dp(6)));
+            }
+            if (state.equals("error") && !job.optString("error").isEmpty()) {
+                gap(card, 4); card.addView(text(job.optString("error"), 13, theme.error()));
+            }
+            boolean complete = state.equals("complete"), pending = BookDownloads.pending(state);
+            var configuration = getResources().getConfiguration();
+            int cardWidth = Math.min(1040, configuration.screenWidthDp) / catalogColumns();
+            boolean stack = configuration.fontScale >= 1.6f || cardWidth < 400;
+            LinearLayout actions = stack ? column() : row();
+            Button action;
+            if (complete) action = control(tr("Читать", "Read"), "book", true, () -> readDownload(job));
+            else if (pending) action = control(tr("Отменить", "Cancel"), "close", false, () -> command("cancel", id));
+            else action = control(tr("Повторить", "Retry"), "refresh", true, () -> command("start", id));
+            actions.addView(action, stack ? match() : weight());
+            if (!pending) {
+                if (stack) gap(actions, 8); else space(actions);
+                Button remove = control(tr("Убрать", "Remove"), "trash", false, () -> new ReaderDialogs(this, theme)
+                        .setTitle(tr("Убрать загрузку?", "Remove download?"))
+                        .setMessage(job.optString("title") + "\n" + tr("Добавленная в библиотеку книга останется.", "The imported book will stay in your library."))
+                        .setNegativeButton(tr("Отмена", "Cancel"), null)
+                        .setPositiveButton(tr("Убрать загрузку", "Remove download"), (d, w) -> command("delete", id)).show());
+                remove.setTextColor(theme.error());
+                remove.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, "trash", theme.error()), null, null, null);
+                actions.addView(remove, stack ? match() : weight());
+            }
+            gap(card, 12); card.addView(actions); cell.addView(card);
+        }
+        long done = job.optLong("done"), total = job.optLong("total", -1);
+        int percent = total > 0 ? (int) Math.min(100, done * 100 / total) : 0;
+        String label = switch (state) {
+            case "complete" -> tr("В библиотеке", "In your library") + " · " + BookDownloads.size(done);
+            case "cancelled" -> tr("Отменено", "Cancelled");
+            case "interrupted" -> tr("Загрузка прервана", "Download interrupted");
+            case "error" -> tr("Не удалось скачать", "Download failed");
+            case "importing" -> tr("Добавляем в библиотеку…", "Adding to library…");
+            case "queued" -> tr("В очереди", "Queued");
+            default -> tr("Загрузка", "Downloading") + " · " + (total > 0 ? percent + "% · " : "")
+                    + BookDownloads.size(done) + (total > 0 ? " / " + BookDownloads.size(total) : "")
+                    + (job.optLong("rate") > 0 ? " · " + BookDownloads.size(job.optLong("rate")) + "/s" : "");
+        };
+        ((TextView) card.findViewWithTag("download-status")).setText(label);
         ProgressBar progress = card.findViewWithTag("download-progress");
-        progress.setIndeterminate(active && job.optLong("total", -1) <= 0); progress.setMax(1000);
-        progress.setProgress((int) Math.min(1000, job.optLong("done") * 1000 / Math.max(1, job.optLong("total"))));
-        TextView amount = card.findViewWithTag("download-amount");
-        amount.setText(job.optString("downloadFormat", job.optString("format")).toUpperCase(Locale.ROOT) + " · " + BookDownloads.size(job.optLong("done"))
-                + (job.optString("state").equals("complete") ? "" : " / " + BookDownloads.size(job.optLong("total", -1)))
-                + (active && job.optLong("rate") > 0 ? " · " + BookDownloads.size(job.optLong("rate")) + "/s" : ""));
+        if (progress != null) { progress.setVisibility(total > 0 ? View.VISIBLE : View.GONE); progress.setProgress(percent); }
+    }
+    private void readDownload(JSONObject job) {
+        String id = job.optString("book");
+        if (getCallingActivity() == null) {
+            startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    .putExtra(EXTRA_READ_BOOK, id));
+        } else setResult(RESULT_OK, new Intent().putExtra(EXTRA_READ_BOOK, id));
+        finish();
     }
     private void command(String action, String id) { try { BookDownloadService.command(this, action, id); } catch (RuntimeException error) { error(error); } }
     private void error(Throwable error) { new ReaderDialogs(this, theme).setTitle(tr("Не получилось", "Something went wrong")).setMessage(Objects.toString(error.getMessage(), error.toString())).setPositiveButton("OK", null).show(); }
