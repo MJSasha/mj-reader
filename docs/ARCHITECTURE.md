@@ -70,7 +70,7 @@ Continuous scrolling is the default and keeps a 700 dp maximum measure. The read
 
 Large changes use saved instance state / Activity recreation. Catalog results and
 loaded-page identities also survive configuration changes through non-configuration state.
-After process death the feed is requested again; this is not a persistent network cache.
+The bottom menu keeps one in-memory catalog session while switching among top-level destinations. It retains the draft, results and current list position without keeping a hidden Activity alive. After process death the feed is requested again; this is not a persistent network cache.
 
 Small size changes may not recreate the Activity. `ReaderOptions.observeWindow`
 rebuilds the relevant route from its retained state and ignores IME-only size changes.

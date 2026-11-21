@@ -7,6 +7,8 @@ import android.content.res.ColorStateList;
 import android.graphics.*;
 import android.graphics.drawable.*;
 import android.os.*;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.*;
 import android.view.inputmethod.*;
 import android.widget.*;
@@ -16,7 +18,7 @@ import java.util.concurrent.*;
 
 /** Flibusta's OPDS catalog and direct book downloads, using the reader's native controls. */
 public class CatalogActivity extends Activity {
-    static final String EXTRA_DOWNLOADS = "downloads", EXTRA_READ_BOOK = "readDownload";
+    static final String EXTRA_DOWNLOADS = "downloads", EXTRA_READ_BOOK = "readDownload", EXTRA_SETTINGS = "openSettings";
     private ReaderOptions theme;
     private SharedPreferences prefs;
     private LinearLayout root, content;
@@ -39,8 +41,11 @@ public class CatalogActivity extends Activity {
     private boolean askDownloadNotifications;
     private String pendingUrl = "";
     private record Retained(List<Flibusta.Entry> entries, Set<String> pages, List<JSONObject> jobs,
-            String url, String next, String title, String message, String pending) {}
-    private String query = "", message = "", currentUrl = "", next = "", feedTitle = "";
+            String url, String next, String title, String message, String pending, String failed, boolean pagingFailed) {}
+    private record Session(Bundle frame, Retained data) {}
+    private static Session session;
+    static void clearSession() { session = null; }
+    private String query = "", message = "", currentUrl = "", next = "", feedTitle = "", failedUrl = "";
     private final List<Flibusta.Entry> entries = new ArrayList<>();
     private final Deque<String> history = new ArrayDeque<>();
     private List<JSONObject> jobs = new ArrayList<>();
@@ -70,6 +75,8 @@ public class CatalogActivity extends Activity {
     };
     @Override public void onCreate(Bundle state) {
         super.onCreate(state); prefs = getSharedPreferences("reader", MODE_PRIVATE); theme = ReaderOptions.load(prefs, null);
+        Session previous = state == null && getCallingActivity() != null ? session : null;
+        if (previous != null) { state = previous.frame(); clearSession(); }
         downloads = getIntent().getBooleanExtra(EXTRA_DOWNLOADS, false);
         String restoreUrl = "";
         if (state != null) {
@@ -79,11 +86,13 @@ public class CatalogActivity extends Activity {
             ArrayList<String> saved = state.getStringArrayList("history"); if (saved != null) history.addAll(saved);
         }
         if (Build.VERSION.SDK_INT >= 33) getOnBackInvokedDispatcher().registerOnBackInvokedCallback(0, this::back);
-        Retained retained = (Retained) getLastNonConfigurationInstance();
+        if (previous != null) downloads = getIntent().getBooleanExtra(EXTRA_DOWNLOADS, false);
+        Retained retained = previous == null ? (Retained) getLastNonConfigurationInstance() : previous.data();
         if (retained != null) {
             entries.addAll(retained.entries()); loadedPages.addAll(retained.pages()); jobs = retained.jobs();
             currentUrl = retained.url(); next = retained.next(); feedTitle = retained.title(); message = retained.message();
             restoreUrl = retained.pending();
+            failedUrl = retained.failed(); pagingFailed = retained.pagingFailed();
         }
         setResult(RESULT_OK); render();
         if (!restoreUrl.isEmpty() && !downloads) load(restoreUrl, false);
@@ -98,15 +107,27 @@ public class CatalogActivity extends Activity {
         if (focused && askDownloadNotifications) root.post(this::maybeRequestDownloadNotifications);
     }
     @Override protected void onSaveInstanceState(Bundle state) {
+        saveFrame(state);
+        super.onSaveInstanceState(state);
+    }
+    private void saveFrame(Bundle state) {
         if (input != null && !downloads) query = input.getText().toString();
         state.putString("query", query); state.putBoolean("authors", authors); state.putBoolean("downloads", downloads);
         rememberScroll(); state.putInt("catalogItem", catalogItem); state.putInt("catalogTop", catalogTop);
         state.putInt("downloadRow", downloadRow); state.putInt("downloadTop", downloadTop);
-        state.putString("url", pendingUrl.isEmpty() ? currentUrl : pendingUrl); state.putStringArrayList("history", new ArrayList<>(history)); super.onSaveInstanceState(state);
+        state.putString("url", pendingUrl.isEmpty() ? currentUrl : pendingUrl); state.putStringArrayList("history", new ArrayList<>(history));
     }
     @Override public Object onRetainNonConfigurationInstance() {
         return new Retained(new ArrayList<>(entries), new HashSet<>(loadedPages), new ArrayList<>(jobs),
-                currentUrl, next, feedTitle, message, pendingUrl);
+                currentUrl, next, feedTitle, message, pendingUrl, failedUrl, pagingFailed);
+    }
+    @Override public void finish() {
+        if (!isFinishing() && getCallingActivity() != null) {
+            Bundle frame = new Bundle();
+            saveFrame(frame);
+            session = new Session(frame, (Retained) onRetainNonConfigurationInstance());
+        }
+        super.finish();
     }
     private void rememberScroll() {
         if (downloads && downloadsList != null && downloadsList.isAttachedToWindow() && downloadsList.getChildCount() > 0) {
@@ -131,7 +152,6 @@ public class CatalogActivity extends Activity {
         if (busy) { cancel(); return; }
         if (loadingMore) { generation++; if (task != null) task.cancel(true); loadingMore = false; }
         if (!downloads && !history.isEmpty()) { load(history.pop(), false); return; }
-        if (!downloads && !currentUrl.isEmpty()) { currentUrl = ""; next = ""; entries.clear(); message = ""; render(); return; }
         finish();
     }
     private void cancel() { generation++; if (task != null) task.cancel(true); loadingMore = false; busy = false; pendingUrl = ""; message = feedTitle; render(); }
@@ -143,59 +163,100 @@ public class CatalogActivity extends Activity {
         ReaderOptions.observeWindow(root, () -> { if (!isDestroyed()) { rememberQuery(); rememberScroll(); render(); } });
         root.setOnApplyWindowInsetsListener((v, insets) -> { int width = getResources().getConfiguration().screenWidthDp;
             int gutter = Math.max(width >= 600 ? 24 : 16, (width - 1040) / 2);
-            v.setPadding(dp(gutter) + insets.getSystemWindowInsetLeft(), dp(8) + insets.getSystemWindowInsetTop(), dp(gutter) + insets.getSystemWindowInsetRight(), dp(8) + insets.getSystemWindowInsetBottom()); return insets; });
+            v.setPadding(dp(gutter) + insets.getSystemWindowInsetLeft(), dp(8) + insets.getSystemWindowInsetTop(), dp(gutter) + insets.getSystemWindowInsetRight(), dp(8) + insets.getSystemWindowInsetBottom());
+            ReaderNavigation.updateInsets(v, insets);
+            return insets; });
         getWindow().setBackgroundDrawable(new ColorDrawable(theme.background()));
         getWindow().getDecorView().setSystemUiVisibility(theme.light() ? View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR : 0);
         setContentView(root); root.requestApplyInsets();
-        LinearLayout mast = row(); mast.addView(iconButton(tr("Назад", "Back"), "back", this::back));
-        space(mast);
-        TextView title = text(downloads ? tr("Загрузки", "Downloads") : tr("Флибуста", "Flibusta"), 24, theme.ink());
+        LinearLayout mast = row();
+        if (!downloads && !history.isEmpty()) {
+            mast.addView(iconButton(tr("Назад", "Back"), "back", this::back)); space(mast);
+        }
+        TextView title = text(getString(downloads ? R.string.downloads : R.string.search), 28, theme.ink());
         title.setTypeface(Typeface.DEFAULT_BOLD);
         if (Build.VERSION.SDK_INT >= 28) title.setAccessibilityHeading(true);
         mast.addView(title, weight());
-        space(mast);
-        if (!downloads) mast.addView(iconButton(tr("Настройки каталога", "Catalog settings"), "settings", this::catalogSettings));
+        if (!downloads) { space(mast); mast.addView(iconButton(tr("Зеркала Флибусты", "Flibusta mirrors"), "globe", this::catalogSettings)); }
         root.addView(mast);
         View mastDivider = new View(this); mastDivider.setBackgroundColor(theme.surface());
-        root.addView(mastDivider, new LinearLayout.LayoutParams(-1, dp(1))); gap(root, 16);
+        root.addView(mastDivider, new LinearLayout.LayoutParams(-1, dp(1))); gap(root, 10);
+        if (!downloads) searchField();
         content = column(); root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
-        LinearLayout dock = row(); dock.setPadding(dp(8), dp(8), dp(8), dp(8));
-        dock.setBackground(shape(theme.surface(), 20));
-        dock.addView(navItem(tr("Каталог", "Catalog"), "book", !downloads, () -> switchTab(false)), weight());
-        space(dock);
-        dock.addView(navItem(tr("Загрузки", "Downloads"), "download", downloads, () -> switchTab(true)), weight());
-        LinearLayout.LayoutParams dockParams = match(); dockParams.topMargin = dp(12);
-        root.addView(dock, dockParams);
+        ReaderNavigation.add(root, theme, downloads ? ReaderNavigation.Tab.DOWNLOADS : ReaderNavigation.Tab.SEARCH, this::navigate);
         if (busy) loading(); else if (downloads) downloadsPage(); else searchPage();
+    }
+    private void navigate(ReaderNavigation.Tab tab) {
+        if (tab == ReaderNavigation.Tab.SEARCH || tab == ReaderNavigation.Tab.DOWNLOADS) {
+            switchTab(tab == ReaderNavigation.Tab.DOWNLOADS);
+            return;
+        }
+        boolean settings = tab == ReaderNavigation.Tab.SETTINGS;
+        if (getCallingActivity() != null) setResult(RESULT_OK, new Intent().putExtra(EXTRA_SETTINGS, settings));
+        else startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(EXTRA_SETTINGS, settings));
+        finish();
     }
     private void switchTab(boolean value) {
         if (input != null && !downloads) query = input.getText().toString();
         if (downloads == value) return;
         rememberScroll();
-        generation++; if (task != null) task.cancel(true); pendingUrl = ""; busy = false; loadingMore = false; downloads = value; render(); handler.removeCallbacks(refresh); handler.post(refresh);
+        hideKeyboard();
+        generation++; if (task != null) task.cancel(true);
+        if (busy) message = feedTitle;
+        pendingUrl = ""; busy = false; loadingMore = false; downloads = value;
+        render(); handler.removeCallbacks(refresh); handler.post(refresh);
     }
-    private void searchPage() {
-        LinearLayout searchBox = row(); searchBox.setBackground(shape(theme.surfaceHigh(), 16)); searchBox.setPadding(dp(4), dp(2), dp(4), dp(2));
+    private void searchField() {
+        LinearLayout searchBox = row();
+        GradientDrawable outline = shape(theme.surfaceHigh(), 28); outline.setStroke(dp(1), theme.outline());
+        searchBox.setBackground(outline); searchBox.setPadding(dp(4), 0, dp(6), 0);
         input = field(query, authors ? tr("Фамилия автора", "Author's name") : tr("Найти книгу", "Find a book"));
-        input.setBackground(theme.feedback(shape(theme.surfaceHigh(), 12), getResources().getDisplayMetrics().density));
+        input.setMinHeight(dp(getResources().getConfiguration().screenHeightDp < 400 ? 52 : 62));
+        input.setBackgroundColor(Color.TRANSPARENT);
+        input.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, "search", theme.muted()), null, null, null);
+        input.setCompoundDrawablePadding(dp(8));
+        input.setOnFocusChangeListener((v, focused) -> outline.setStroke(dp(focused ? 2 : 1), focused ? theme.accent() : theme.outline()));
         input.setImeOptions(EditorInfo.IME_ACTION_SEARCH | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
         input.setOnEditorActionListener((v, action, event) -> { if (action == EditorInfo.IME_ACTION_SEARCH) { search(); return true; } return false; });
         searchBox.addView(input, new LinearLayout.LayoutParams(0, -2, 1));
-        Button submit = iconButton(tr("Найти", "Find"), "search", this::search);
-        submit.setBackground(theme.feedback(shape(theme.accent(), 14), getResources().getDisplayMetrics().density));
-        submit.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, "search", theme.onAccent()), null, null, null);
-        searchBox.addView(submit); content.addView(searchBox); gap(content, 10);
-        boolean stackedTools = getResources().getConfiguration().screenWidthDp < 400
-                && getResources().getConfiguration().fontScale >= 1.6f;
-        LinearLayout tools = stackedTools ? column() : row();
-        Button scope = textAction(authors ? tr("По автору", "By author") : tr("По названию", "By title"), "sort", this::searchOptions);
-        tools.addView(scope, stackedTools ? match() : weight());
-        if (stackedTools) gap(tools, 8); else space(tools);
-        tools.addView(textAction(tr("Разделы", "Browse"), "library", () -> { rememberQuery(); history.clear(); load(base(), false); }), stackedTools ? match() : weight());
-        content.addView(tools); gap(content, 14);
+        Button clear = iconButton(tr("Очистить поиск", "Clear search"), "close", this::clearSearch);
+        clear.setVisibility(query.isEmpty() ? View.GONE : View.VISIBLE);
+        input.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { clear.setVisibility(s.length() == 0 ? View.GONE : View.VISIBLE); }
+            @Override public void afterTextChanged(Editable editable) {}
+        });
+        clear.setBackground(theme.feedback(shape(theme.surfaceHigh(), 24), getResources().getDisplayMetrics().density));
+        searchBox.addView(clear);
+        Button submit = iconButton(tr("Найти", "Find"), "forward", this::search);
+        submit.setBackground(theme.feedback(shape(theme.accent(), 24), getResources().getDisplayMetrics().density));
+        submit.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, "forward", theme.onAccent()), null, null, null);
+        LinearLayout.LayoutParams submitParams = (LinearLayout.LayoutParams) submit.getLayoutParams();
+        submitParams.setMarginStart(dp(8));
+        searchBox.addView(submit, submitParams); root.addView(searchBox); gap(root, 12);
+    }
+    private void searchPage() {
+        LinearLayout scopes = row();
+        Button title = control(tr("По названию", "By title"), "", false, () -> {});
+        Button author = control(tr("По автору", "By author"), "", false, () -> {});
+        for (Button scope : new Button[]{title, author}) scope.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, null, null);
+        title.setOnClickListener(v -> selectScope(false, title, author));
+        author.setOnClickListener(v -> selectScope(true, title, author));
+        selectScope(authors, title, author);
+        scopes.addView(title, weight()); space(scopes); scopes.addView(author, weight());
+        content.addView(scopes); gap(content, 8);
+        content.addView(textAction(tr("Разделы", "Browse"), "library", () -> { rememberQuery(); history.clear(); load(base(), false); }), match());
+        gap(content, 14);
+        if (!failedUrl.isEmpty()) {
+            content.addView(textAction(tr("Повторить запрос", "Retry search"), "refresh", () -> load(failedUrl, false)), match());
+            gap(content, 8);
+        }
         if (!message.isEmpty()) { resultStatus = text(message, 14, theme.muted()); content.addView(resultStatus); gap(content, 10); }
-        if (entries.isEmpty() && next.isEmpty()) empty(currentUrl.isEmpty() ? tr("Выбирайте, что читать дальше", "Choose your next read") : tr("Ничего не найдено", "No results"),
-                currentUrl.isEmpty() ? tr("Ищите по названию или автору, открывайте разделы каталога. EPUB, FB2 и TXT скачиваются прямо в MJReader.", "Search by title or author, or browse the catalog. EPUB, FB2 and TXT books download directly into MJReader.") : tr("Попробуйте другое название, фамилию автора или адрес каталога.", "Try another title, author, or catalog address."));
+        if (entries.isEmpty() && next.isEmpty()) empty(failedUrl.isEmpty() ? currentUrl.isEmpty()
+                        ? tr("Поиск книг", "Find books") : tr("Ничего не найдено", "No results") : tr("Каталог недоступен", "Catalog unavailable"),
+                currentUrl.isEmpty() && failedUrl.isEmpty() ? tr("Введите название книги или фамилию автора.", "Enter a book title or an author's name.")
+                        : tr("Измените запрос или проверьте зеркало Флибусты.", "Change the query or check your Flibusta mirror."));
         else {
             ListView list = list(); adapter = new BaseAdapter() {
                 public int getCount() { return (entries.size() + catalogColumns() - 1) / catalogColumns(); }
@@ -266,15 +327,41 @@ public class CatalogActivity extends Activity {
         }
         return card;
     }
-    private void rememberQuery() { if (input != null && !downloads) query = input.getText().toString().trim(); }
-    private void searchOptions() {
-        rememberQuery(); rememberScroll();
-        new ReaderDialogs(this, theme).setTitle(tr("Искать по", "Search by"))
-                .setItems(new String[]{tr("Название книги", "Book title"), tr("Автор", "Author")}, (d, which) -> { authors = which == 1; render(); }).show();
+    private void rememberQuery() { if (input != null && !downloads) query = input.getText().toString(); }
+    private void selectScope(boolean author, Button byTitle, Button byAuthor) {
+        authors = author;
+        String hint = author ? tr("Фамилия автора", "Author's name") : tr("Найти книгу", "Find a book");
+        input.setHint(hint); input.setContentDescription(hint);
+        for (Button choice : new Button[]{byTitle, byAuthor}) {
+            boolean selected = (choice == byAuthor) == author;
+            choice.setSelected(selected);
+            choice.setTextColor(selected ? theme.onSelection() : theme.ink());
+            choice.setBackground(theme.feedback(shape(selected ? theme.selection() : theme.surface(), 16),
+                    getResources().getDisplayMetrics().density));
+        }
+    }
+    private void clearSearch() {
+        generation++;
+        if (task != null) task.cancel(true);
+        busy = loadingMore = pagingFailed = false;
+        query = currentUrl = next = feedTitle = message = pendingUrl = failedUrl = "";
+        catalogItem = -1; catalogTop = 0;
+        entries.clear(); loadedPages.clear(); history.clear();
+        render();
+        focusSearch();
+    }
+    private void focusSearch() {
+        input.requestFocus();
+        ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).showSoftInput(input, InputMethodManager.SHOW_IMPLICIT);
+    }
+    private void hideKeyboard() {
+        ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(root.getWindowToken(), 0);
     }
     private void search() {
-        rememberQuery(); if (query.isEmpty()) { input.requestFocus(); ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).showSoftInput(input, InputMethodManager.SHOW_IMPLICIT); return; }
-        try { history.clear(); load(Flibusta.searchUrl(base(), query, authors), false); }
+        rememberQuery();
+        String submitted = query.trim();
+        if (submitted.isEmpty()) { focusSearch(); return; }
+        try { history.clear(); load(Flibusta.searchUrl(base(), submitted, authors), false); }
         catch (Exception error) { error(error); }
     }
     private void load(String address, boolean append) {
@@ -283,10 +370,11 @@ public class CatalogActivity extends Activity {
             loadingMore = true; pagingFailed = false; updatePaging();
         } else {
             rememberQuery();
-            ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(root.getWindowToken(), 0);
+            hideKeyboard();
             if (task != null) task.cancel(true);
             loadingMore = false; pagingFailed = false;
-            pendingUrl = address; busy = true; message = tr("Открываем каталог…", "Opening catalog…"); render();
+            failedUrl = "";
+            pendingUrl = address; busy = true; message = tr("Ищем книги…", "Finding books…"); render();
         }
         int token = ++generation;
         boolean automatic = prefs.getString("catalog", "auto").equals("auto");
@@ -323,7 +411,11 @@ public class CatalogActivity extends Activity {
                 runOnUiThread(() -> {
                     if (!valid(token)) return; busy = false; loadingMore = false;
                     if (append) { pagingFailed = true; updatePaging(); }
-                    else { pendingUrl = ""; message = tr("Не удалось открыть каталог. Проверьте сеть или смените адрес.", "Catalog unavailable. Check your connection or change the address."); render(); error(error); }
+                    else {
+                        failedUrl = address; pendingUrl = "";
+                        message = entries.isEmpty() ? "" : tr("Запрос не выполнен. Показаны предыдущие результаты.", "Search failed. Showing previous results.");
+                        render();
+                    }
                 });
             }
         });
@@ -597,9 +689,7 @@ public class CatalogActivity extends Activity {
         TextView heading = text(title, 22, theme.ink()); heading.setTypeface(Typeface.DEFAULT_BOLD);
         panel.addView(heading); gap(panel, 10); panel.addView(text(detail, 15, theme.muted()));
         gap(panel, 20);
-        panel.addView(control(downloads ? tr("Открыть каталог", "Browse catalog") : tr("Разделы каталога", "Catalog sections"), "library", false, () -> {
-            if (downloads) switchTab(false); else { rememberQuery(); history.clear(); load(base(), false); }
-        }), match());
+        if (downloads) panel.addView(control(tr("Найти книги", "Find books"), "search", false, () -> switchTab(false)), match());
         page.addView(panel); scroll.addView(page); content.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
     }
     private Button iconButton(String description, String icon, Runnable action) {
@@ -613,19 +703,6 @@ public class CatalogActivity extends Activity {
         button.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, icon, theme.muted()), null, null, null);
         button.setBackground(theme.feedback(shape(theme.surface(), 14), getResources().getDisplayMetrics().density));
         button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL); return button;
-    }
-    private View navItem(String label, String icon, boolean selected, Runnable action) {
-        Button button = control(label, icon, false, action);
-        int color = selected ? theme.onSelection() : theme.muted();
-        button.setBackground(theme.feedback(shape(selected ? theme.selection() : theme.surface(), 12),
-                getResources().getDisplayMetrics().density));
-        button.setTextColor(color); button.setSelected(selected); button.setGravity(Gravity.CENTER);
-        button.setTextSize(14);
-        if (getResources().getConfiguration().screenWidthDp < 400
-                && getResources().getConfiguration().fontScale >= 1.6f)
-            button.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, null, null);
-        else button.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, icon, color), null, null, null);
-        return button;
     }
     private LinearLayout column() { LinearLayout view = new LinearLayout(this); view.setOrientation(LinearLayout.VERTICAL); return view; }
     private LinearLayout row() { LinearLayout view = new LinearLayout(this); view.setGravity(Gravity.CENTER_VERTICAL); return view; }
@@ -641,13 +718,14 @@ public class CatalogActivity extends Activity {
     private EditText field(String value, String hint) { EditText view = new EditText(this); view.setSingleLine(); view.setImeOptions(EditorInfo.IME_FLAG_NO_EXTRACT_UI); view.setText(value); view.setHint(hint); view.setContentDescription(hint); view.setTextSize(16); view.setTextColor(theme.ink()); view.setHintTextColor(theme.muted()); view.setPadding(dp(14), dp(12), dp(14), dp(12)); view.setMinHeight(dp(52)); view.setBackground(theme.feedback(shape(theme.surface(), 16), getResources().getDisplayMetrics().density)); return view; }
     private LinearLayout takeHeader() {
         LinearLayout header = column();
-        while (root.getChildAt(2) != content) { View view = root.getChildAt(2); root.removeViewAt(2); header.addView(view); }
         while (content.getChildCount() > 0) { View view = content.getChildAt(0); content.removeViewAt(0); header.addView(view); }
         return header;
     }
     private ListView list() {
         ListView view = new ListView(this); view.setDivider(null); view.setSelector(new ColorDrawable(Color.TRANSPARENT)); view.setCacheColorHint(Color.TRANSPARENT);
-        view.setItemsCanFocus(true); view.addHeaderView(takeHeader(), null, false); return view;
+        view.setItemsCanFocus(true);
+        if (!downloads) view.addHeaderView(takeHeader(), null, false);
+        return view;
     }
     private GradientDrawable shape(int color, int radius) { GradientDrawable shape = new GradientDrawable(); shape.setColor(color); shape.setCornerRadius(dp(radius)); return shape; }
     private LinearLayout.LayoutParams weight() { return new LinearLayout.LayoutParams(0, -2, 1); }

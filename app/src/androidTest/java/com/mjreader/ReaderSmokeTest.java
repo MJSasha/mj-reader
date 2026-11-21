@@ -321,12 +321,68 @@ public class ReaderSmokeTest extends Instrumentation {
                 capture("covers-" + theme);
             }
             runOnMainSync(reopened::finish);
+            mainNavigationCheck(context);
             result.putString("stream", "PASS: batch/invalid-file imports, targeted reimport menu/cancel/wrong file, duplicates, FB2/FB2.ZIP encodings/images/chapters/repair/XML rejection, EPUB covers/navigation, rename/collections/favorite/status/delete/undo, in-book search, RU/EN RSVP, search library, bookmark, jump history, reflow anchor, per-book settings, relaunch position\n");
             finish(Activity.RESULT_OK, result);
         } catch (Throwable error) {
             result.putString("stream", android.util.Log.getStackTraceString(error));
             finish(Activity.RESULT_CANCELED, result);
         }
+    }
+    private void mainNavigationCheck(Context context) throws Exception {
+        var prefs = context.getSharedPreferences("reader", 0);
+        String saved = prefs.getString("options", "{}");
+        MainActivity home = startStableMain(context);
+        CatalogActivity search = null;
+        try {
+            search = openSearchTab(home);
+            CatalogActivity first = search;
+            runOnMainSync(() -> {
+                ((EditText) field(first, "input")).setText("  Saved draft ");
+                var entries = (java.util.List<Flibusta.Entry>) field(first, "entries");
+                entries.add(new Flibusta.Entry("Saved result", "MJReader", "", "https://example.test/book.epub", "epub", true));
+            });
+            clickTab(search, ReaderNavigation.Tab.DOWNLOADS);
+            clickTab(search, ReaderNavigation.Tab.SETTINGS);
+            awaitText(home, "Appearance");
+            if (!((View) home.getWindow().getDecorView().findViewWithTag(ReaderNavigation.Tab.SETTINGS)).isSelected())
+                throw new AssertionError("Settings destination not selected");
+            click(home, "Appearance");
+            click(home, "Typeface");
+            clickSystem("Roboto");
+            if (((ReaderOptions) field(home, "options")).fontIndex() != 3
+                    || !((ReaderOptions) field(home, "options")).typeface(home).equals(home.getResources().getFont(R.font.roboto)))
+                throw new AssertionError("Roboto choice did not load the bundled font");
+            runOnMainSync(home::onBackPressed);
+            search = openSearchTab(home);
+            if (!((EditText) field(search, "input")).getText().toString().equals("  Saved draft ")
+                    || ((java.util.List<?>) field(search, "entries")).size() != 1)
+                throw new AssertionError("Top-level navigation lost catalog draft or results");
+            click(search, "Clear search");
+            if (!((EditText) field(search, "input")).getText().toString().isEmpty()
+                    || !((java.util.List<?>) field(search, "entries")).isEmpty()) throw new AssertionError("Clear search left old results");
+        } finally {
+            CatalogActivity closing = search;
+            runOnMainSync(() -> { if (closing != null) closing.finish(); home.finish(); });
+            prefs.edit().putString("options", saved).commit();
+        }
+    }
+    private CatalogActivity openSearchTab(MainActivity home) {
+        ActivityMonitor monitor = addMonitor(CatalogActivity.class.getName(), null, false);
+        try {
+            clickTab(home, ReaderNavigation.Tab.SEARCH);
+            CatalogActivity search = (CatalogActivity) waitForMonitorWithTimeout(monitor, 10000);
+            if (search == null) throw new AssertionError("Search destination did not open");
+            waitForIdleSync();
+            return search;
+        } finally { removeMonitor(monitor); }
+    }
+    private void clickTab(Activity activity, ReaderNavigation.Tab tab) {
+        runOnMainSync(() -> {
+            View item = activity.getWindow().getDecorView().findViewWithTag(tab);
+            if (item == null || !item.performClick()) throw new AssertionError("Unavailable destination " + tab);
+        });
+        waitForIdleSync();
     }
     private void sampleCheck() throws Exception {
         Context context = getTargetContext();
@@ -794,14 +850,13 @@ public class ReaderSmokeTest extends Instrumentation {
             capture("visual-settings-" + theme);
             String font = context.getResources().getConfiguration().getLocales().get(0).getLanguage().equals("ru") ? "С засечками" : "Serif";
             click(activity, font);
-            runOnMainSync(() -> find(activity.getWindow().getDecorView(), font).requestRectangleOnScreen(new android.graphics.Rect(0, 0, 100, 250), true));
             waitForIdleSync(); Thread.sleep(250);
             capture("visual-selector-" + theme);
             boolean russian = context.getResources().getConfiguration().getLocales().get(0).getLanguage().equals("ru");
-            click(activity, russian ? "Без засечек" : "Sans serif");
+            clickSystem(russian ? "Без засечек" : "Sans serif");
             if (((ReaderOptions) field(activity, "options")).number("font", 0) != 1) throw new AssertionError("Selector did not apply");
             click(activity, russian ? "Без засечек" : "Sans serif");
-            click(activity, font);
+            clickSystem(font);
             runOnMainSync(activity::onBackPressed);
             final boolean[] accepted = {false};
             runOnMainSync(() -> new ReaderDialogs(activity, (ReaderOptions) field(activity, "options"))
@@ -863,12 +918,12 @@ public class ReaderSmokeTest extends Instrumentation {
                     capture("chrome-catalog-" + scenario);
                     boolean russian = context.getResources().getConfiguration().getLocales().get(0).getLanguage().equals("ru");
                     ViewGroup before = (ViewGroup) field(catalog, "root");
-                    TextView tab = find(before.getChildAt(before.getChildCount() - 1), russian ? "Каталог" : "Catalog");
-                    if (scenario < 2 && tab.getHeight() > 52 * context.getResources().getDisplayMetrics().density) throw new AssertionError("Catalog tab is too tall");
+                    View tab = before.findViewWithTag(ReaderNavigation.Tab.SEARCH);
+                    if (tab == null || !tab.isSelected()) throw new AssertionError("Search tab not selected");
                     runOnMainSync(() -> invoke(catalog, "bookDetails", new Class[]{Flibusta.Entry.class}, book));
                     waitForIdleSync(); capture("chrome-book-details-" + scenario);
                     clickSystem(russian ? "Закрыть" : "Close");
-                    click(catalog, russian ? "Загрузки" : "Downloads");
+                    clickTab(catalog, ReaderNavigation.Tab.DOWNLOADS);
                     ViewGroup root = (ViewGroup) field(catalog, "root");
                     TextView selected = find(root.getChildAt(root.getChildCount() - 1), russian ? "Загрузки" : "Downloads");
                     if (!(boolean) field(catalog, "downloads") || !selected.isSelected()) throw new AssertionError("Downloads tab did not select");
@@ -1257,7 +1312,7 @@ public class ReaderSmokeTest extends Instrumentation {
             runOnMainSync(() -> { invoke(normal, "setFullscreen", new Class[]{boolean.class}, false); }); awaitPages(screen);
             if ((int) field(screen, "anchor") != saved) throw new AssertionError("Fullscreen lost page position");
             runOnMainSync(() -> invoke(normal, "settings", new Class[]{boolean.class}, false));
-            click(normal, "Pages"); click(normal, "Scroll");
+            click(normal, "Pages"); clickSystem("Scroll");
             runOnMainSync(normal::onBackPressed); waitForIdleSync();
             awaitField(normal, "body"); Thread.sleep(200); waitForIdleSync();
             if (field(normal, "pageReader") != null || (int) field(normal, "anchor") != saved)
@@ -1274,9 +1329,15 @@ public class ReaderSmokeTest extends Instrumentation {
             int scrolled = (int) field(normal, "anchor");
             if (scrolled <= saved) throw new AssertionError("Continuous scrolling no longer works");
             runOnMainSync(() -> invoke(normal, "settings", new Class[]{boolean.class}, false));
-            click(normal, "Scroll"); click(normal, "Pages");
+            click(normal, "Scroll"); clickSystem("Pages");
             runOnMainSync(normal::onBackPressed); pages = awaitPages(normal);
             if (pages.start() != scrolled) throw new AssertionError("Switch to pages lost position");
+            runOnMainSync(() -> invoke(normal, "settings", new Class[]{boolean.class}, false));
+            click(normal, "Tap page edges to turn");
+            runOnMainSync(normal::onBackPressed);
+            awaitPages(normal);
+            tapReading(normal, .9f);
+            if (awaitPages(normal).start() != scrolled) throw new AssertionError("Disabled edge tap turned a page");
             runOnMainSync(normal::finish); screen = null;
             // Large text, paper theme, short landscape and reduced motion.
             for (String size : new String[]{"430x932", "740x360"}) {
@@ -1547,9 +1608,8 @@ public class ReaderSmokeTest extends Instrumentation {
     }
     private void assertChrome(Activity activity, ListView list) {
         runOnMainSync(() -> {
-            boolean russian = activity.getResources().getConfiguration().getLocales().get(0).getLanguage().equals("ru");
             String heading = activity instanceof MainActivity ? activity.getString(R.string.library)
-                    : (russian ? "Флибуста" : "Flibusta");
+                    : activity.getString(R.string.search);
             TextView title = find(activity.getWindow().getDecorView(), heading);
             android.graphics.Rect visible = new android.graphics.Rect();
             if (title == null || !title.getGlobalVisibleRect(visible) || visible.height() < title.getHeight())

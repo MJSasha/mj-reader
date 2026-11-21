@@ -40,7 +40,7 @@ final class ReaderPages extends View {
         this.worker = worker; this.style = style; this.moved = moved;
         paint.setColor(options.ink());
         paint.setTextSize(options.number("size", 21) * getResources().getDisplayMetrics().scaledDensity);
-        paint.setTypeface(Typeface.create(new String[]{"serif", "sans-serif", "monospace"}[options.number("font", 0)], Typeface.NORMAL));
+        paint.setTypeface(options.typeface(context));
         paint.setTextLocale(ReaderText.language(book.text()));
         setFocusable(true); setClickable(true); setLongClickable(true);
         setOnClickListener(v -> center.run());
@@ -55,9 +55,9 @@ final class ReaderPages extends View {
             @Override public boolean onSingleTapUp(MotionEvent event) {
                 if (!ready()) return true;
                 if (note.test(noteOffsetAt(event.getX(), event.getY()))) return true;
-                if (event.getX() < getWidth() * .25f) turn(-1);
-                else if (event.getX() > getWidth() * .75f) turn(1);
-                else performClick();
+                int edge = event.getX() < getWidth() * .25f ? -1 : event.getX() > getWidth() * .75f ? 1 : 0;
+                if (edge == 0) performClick();
+                else if (options.flag("edgeTurns", true)) turn(edge);
                 return true;
             }
             @Override public void onLongPress(MotionEvent event) {

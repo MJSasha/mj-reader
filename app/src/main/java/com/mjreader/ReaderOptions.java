@@ -1,7 +1,9 @@
 package com.mjreader;
 
+import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import org.json.JSONObject;
 
 final class ReaderOptions {
@@ -13,6 +15,18 @@ final class ReaderOptions {
     }
     int number(String key, int fallback) { return values.optInt(key, fallback); }
     boolean flag(String key, boolean fallback) { return values.optBoolean(key, fallback); }
+    int fontIndex() {
+        int font = number("font", 0);
+        return font >= 0 && font <= 3 ? font : 0;
+    }
+    Typeface typeface(Context context) {
+        return switch (fontIndex()) {
+            case 1 -> Typeface.SANS_SERIF;
+            case 2 -> Typeface.MONOSPACE;
+            case 3 -> context.getResources().getFont(R.font.roboto);
+            default -> Typeface.SERIF;
+        };
+    }
     void put(String key, Object value) {
         try { values.put(key, value); } catch (Exception e) { throw new IllegalArgumentException(e); }
     }

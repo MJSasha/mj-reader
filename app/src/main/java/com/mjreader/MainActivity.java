@@ -62,12 +62,13 @@ public class MainActivity extends Activity {
     private int pictureRequest, restoreRequest;
     private TextView body, counter, contextLabel, chapterLabel, importStatus;
     private FocusView focusView;
-    private Button play;
+    private Button play, previousPageButton, nextPageButton;
     private SeekBar progress;
     private int renderVersion, textStart, textEnd;
     private boolean settingsOpen, settingsRsvp, settingsLibrary, restoreSettings;
+    private boolean settingsOverview, settingsFromOverview;
     private ScrollView settingsScroll;
-    private int settingsY;
+    private int settingsY, settingsOverviewY;
     private final LinkedHashMap<String, Bitmap> covers = new LinkedHashMap<>(16, .75f, true);
     private final Runnable tick = new Runnable() {
         @Override public void run() {
@@ -118,7 +119,10 @@ public class MainActivity extends Activity {
             restoreSettings = state.getBoolean("settingsOpen");
             settingsRsvp = state.getBoolean("settingsRsvp");
             settingsLibrary = state.getBoolean("settingsLibrary");
+            settingsOverview = state.getBoolean("settingsOverview");
+            settingsFromOverview = state.getBoolean("settingsFromOverview");
             settingsY = state.getInt("settingsY");
+            settingsOverviewY = state.getInt("settingsOverviewY");
             pendingDownloadBook = state.getString("downloadBook");
         }
         if (Build.VERSION.SDK_INT >= 33) getOnBackInvokedDispatcher().registerOnBackInvokedCallback(0, this::back);
@@ -194,8 +198,9 @@ public class MainActivity extends Activity {
             open(book, state.getBoolean("focus"));
             return;
         }
-        library();
-        if (restoreSettings) { if (settingsLibrary) sortDialog(); else settings(settingsRsvp); }
+        if (restoreSettings) restoreSettingsPage();
+        else if (state == null && getIntent().getBooleanExtra(CatalogActivity.EXTRA_SETTINGS, false)) settingsOverview();
+        else library();
     }
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
@@ -204,6 +209,11 @@ public class MainActivity extends Activity {
         if (download != null) {
             pendingDownloadBook = download;
             if (libraryLoaded) refreshCatalog(download);
+            return;
+        }
+        if (intent.hasExtra(CatalogActivity.EXTRA_SETTINGS) && libraryLoaded) {
+            library();
+            if (intent.getBooleanExtra(CatalogActivity.EXTRA_SETTINGS, false)) settingsOverview();
             return;
         }
         receiveFile(intent);
@@ -246,7 +256,10 @@ public class MainActivity extends Activity {
         state.putBoolean("settingsOpen", settingsOpen);
         state.putBoolean("settingsRsvp", settingsRsvp);
         state.putBoolean("settingsLibrary", settingsLibrary);
+        state.putBoolean("settingsOverview", settingsOverview);
+        state.putBoolean("settingsFromOverview", settingsFromOverview);
         state.putInt("settingsY", settingsScroll == null ? 0 : settingsScroll.getScrollY());
+        state.putInt("settingsOverviewY", settingsOverviewY);
         super.onSaveInstanceState(state);
     }
     @Override protected void onPause() { if (notePopup != null) notePopup.dismiss(); pause(); super.onPause(); }
@@ -254,7 +267,10 @@ public class MainActivity extends Activity {
         unregisterReceiver(downloadedBooks);
         handler.removeCallbacksAndMessages(null);
         worker.shutdown();
-        if (active.get() == this) active.clear();
+        if (active.get() == this) {
+            if (isFinishing()) CatalogActivity.clearSession();
+            active.clear();
+        }
         super.onDestroy();
     }
     @android.annotation.SuppressLint("GestureBackNavigation")
@@ -263,7 +279,8 @@ public class MainActivity extends Activity {
         if (settingsOpen) {
             settingsOpen = false;
             settingsY = 0;
-            if (current != null) reader(); else library();
+            if (settingsFromOverview) { settingsY = settingsOverviewY; settingsOverview(); }
+            else if (current != null) reader(); else library();
             return;
         }
         if (fullscreen) { setFullscreen(false); return; }
@@ -310,7 +327,7 @@ public class MainActivity extends Activity {
             if (isDestroyed()) return;
             if (settingsOpen) {
                 settingsY = settingsScroll == null ? 0 : settingsScroll.getScrollY();
-                if (settingsLibrary) sortDialog(); else settings(settingsRsvp);
+                restoreSettingsPage();
             } else if (current != null && reading != null) reader();
             else if (current == null && libraryList != null && libraryList.isAttachedToWindow()) library();
             else root.requestApplyInsets();
@@ -325,6 +342,7 @@ public class MainActivity extends Activity {
                     dp(8) + (reader ? insets.getStableInsetTop() : insets.getSystemWindowInsetTop()),
                     dp(gutter) + (reader ? insets.getStableInsetRight() : insets.getSystemWindowInsetRight()),
                     dp(8) + (reader ? insets.getStableInsetBottom() : insets.getSystemWindowInsetBottom()));
+            ReaderNavigation.updateInsets(view, insets);
             return insets;
         });
         if (startup == null) {
@@ -400,6 +418,7 @@ public class MainActivity extends Activity {
     private void library() {
         if (startup == null) automaticUpdates();
         settingsOpen = false;
+        settingsOverview = settingsFromOverview = false;
         pause();
         current = null;
         reading = null;
@@ -414,9 +433,9 @@ public class MainActivity extends Activity {
         brand.setTypeface(Typeface.DEFAULT_BOLD);
         if (Build.VERSION.SDK_INT >= 28) brand.setAccessibilityHeading(true);
         mast.addView(brand, new LinearLayout.LayoutParams(0, -2, 1));
-        mast.addView(readerAction("download", tr("Загрузки", "Downloads"), () -> showCatalog(true)), new LinearLayout.LayoutParams(dp(48), dp(48)));
-        space(mast);
-        mast.addView(readerAction("settings", tr("Настройки", "Settings"), () -> settings(false)), new LinearLayout.LayoutParams(dp(48), dp(48)));
+        Button add = readerAction("plus", getString(R.string.add_book), this::pickBooks);
+        add.setEnabled(!importing);
+        mast.addView(add, new LinearLayout.LayoutParams(dp(48), dp(48)));
         root.addView(mast);
         View mastDivider = new View(this);
         mastDivider.setBackgroundColor(options.surface());
@@ -533,24 +552,15 @@ public class MainActivity extends Activity {
             status.addView(importStatus, weight());
             root.addView(status, matchWrap()); gap(root, 8);
         }
-        Button add = button(importing ? tr("Импортируем…", "Importing…") : getString(R.string.add_book), true, this::pickBooks);
-        add.setEnabled(!importing);
-        LinearLayout dock = row();
-        dock.setPadding(dp(8), dp(8), dp(8), dp(8));
-        dock.setBackground(shape(options.surface(), 20));
-        Button discover = button(tr("Найти книги", "Discover"), false, () -> showCatalog(false));
-        boolean stackedDock = narrow && getResources().getConfiguration().fontScale >= 1.6f;
-        if (narrow) for (Button action : new Button[]{add, discover}) {
-            action.setTextSize(14);
-            action.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, null, null);
+        ReaderNavigation.add(root, options, ReaderNavigation.Tab.LIBRARY, this::navigate);
+    }
+    private void navigate(ReaderNavigation.Tab tab) {
+        switch (tab) {
+            case LIBRARY -> { if (settingsOpen) library(); }
+            case SETTINGS -> { if (!settingsOverview) { settingsY = 0; settingsOverview(); } }
+            case SEARCH -> showCatalog(false);
+            case DOWNLOADS -> showCatalog(true);
         }
-        if (stackedDock) dock.setOrientation(LinearLayout.VERTICAL);
-        dock.addView(add, stackedDock ? matchWrap() : weight());
-        if (stackedDock) gap(dock, 8); else space(dock);
-        dock.addView(discover, stackedDock ? matchWrap() : weight());
-        LinearLayout.LayoutParams dockParams = matchWrap();
-        dockParams.topMargin = dp(12);
-        root.addView(dock, dockParams);
     }
     private void showCatalog(boolean downloads) {
         startActivityForResult(new Intent(this, CatalogActivity.class).putExtra(CatalogActivity.EXTRA_DOWNLOADS, downloads), CATALOG_REQUEST);
@@ -563,13 +573,17 @@ public class MainActivity extends Activity {
                     if (isDestroyed() || isFinishing()) return;
                     books = loaded;
                     if (id == null) {
-                        if (pendingDownloadBook == null && current == null && !settingsOpen) library();
+                        if (pendingDownloadBook == null && current == null && !settingsOpen) {
+                            if (libraryList != null && libraryList.isAttachedToWindow()) refreshShelf();
+                            else library();
+                        }
                         return;
                     }
                     if (!id.equals(pendingDownloadBook)) return;
                     pendingDownloadBook = null;
                     for (Books.Book book : books) if (book.id().equals(id) && !prefs.getBoolean(key(book, "deleted"), false)) {
                         settingsOpen = false;
+                        settingsOverview = settingsFromOverview = false;
                         restoreSettings = false;
                         open(book, false);
                         return;
@@ -688,25 +702,21 @@ public class MainActivity extends Activity {
     }
     private void sortDialog() {
         settingsOpen = true;
+        settingsOverview = false;
         settingsLibrary = true;
         restoreSettings = false;
         shell();
         settingsHeader(tr("Вид библиотеки", "Library layout"));
-        settingsScroll = new ScrollView(this);
-        LinearLayout page = column();
-        settingsScroll.addView(page);
-        root.addView(settingsScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        LinearLayout page = settingsPage();
         LinearLayout content = settingsGroup(page, "sort", tr("Отображение", "Display"));
         toggle(content, tr("Сетка обложек", "Cover grid"), grid, checked -> {
             grid = checked; prefs.edit().putBoolean("grid", grid).apply();
         });
-        choose(content, tr("Сортировка", "Sort order"), new String[]{tr("Последнее открытие", "Last opened"),
+        choose(content, "sort", tr("Сортировка", "Sort order"), new String[]{tr("Последнее открытие", "Last opened"),
                 tr("Название", "Title"), tr("Дата добавления", "Date added")}, sort, value -> {
             sort = value; prefs.edit().putInt("sort", sort).apply();
         });
-        int scrollY = settingsY;
-        ScrollView scroll = settingsScroll;
-        scroll.post(() -> scroll.scrollTo(0, scrollY));
+        restoreSettingsScroll();
     }
     private class BookAdapter extends BaseAdapter {
         final List<Books.Book> visible = new ArrayList<>();
@@ -939,6 +949,10 @@ public class MainActivity extends Activity {
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (request == CATALOG_REQUEST) {
+            if (result == RESULT_OK && data != null && data.hasExtra(CatalogActivity.EXTRA_SETTINGS)) {
+                if (data.getBooleanExtra(CatalogActivity.EXTRA_SETTINGS, false)) navigate(ReaderNavigation.Tab.SETTINGS);
+                else navigate(ReaderNavigation.Tab.LIBRARY);
+            }
             String book = result == RESULT_OK && data != null ? data.getStringExtra(CatalogActivity.EXTRA_READ_BOOK) : null;
             if (book != null) pendingDownloadBook = book;
             if (libraryLoaded) refreshCatalog(book);
@@ -1046,7 +1060,7 @@ public class MainActivity extends Activity {
                 prefs.edit().putLong(key(book, "opened"), System.currentTimeMillis())
                         .putString(key(book, "status"), prefs.getString(key(book, "status"), "want").equals("done") ? "done" : "reading").apply();
                 reader();
-                if (restoreSettings) { if (settingsLibrary) sortDialog(); else settings(settingsRsvp); }
+                if (restoreSettings) restoreSettingsPage();
             });
         });
     }
@@ -1140,8 +1154,7 @@ public class MainActivity extends Activity {
     private void scrollScreen() {
         textScroll = new ScrollView(this);
         body = label("", options.number("size", prefs.getInt("typeSize", 21)), options.ink());
-        String[] fonts = {"serif", "sans-serif", "monospace"};
-        body.setTypeface(Typeface.create(fonts[options.number("font", 0)], Typeface.NORMAL));
+        body.setTypeface(options.typeface(this));
         body.setLineSpacing(0, options.number("line", 150) / 100f);
         body.setGravity(options.number("alignment", 0) == 2 ? Gravity.CENTER_HORIZONTAL : Gravity.START);
         body.setJustificationMode(options.number("alignment", 0) == 1 ? android.graphics.text.LineBreaker.JUSTIFICATION_MODE_INTER_WORD : android.graphics.text.LineBreaker.JUSTIFICATION_MODE_NONE);
@@ -1215,8 +1228,10 @@ public class MainActivity extends Activity {
         footer.setPadding(dp(8), compact ? 0 : dp(8), dp(8), compact ? 0 : dp(8));
         footer.setBackground(shape(options.surface(), 20));
         LinearLayout navigation = row();
+        previousPageButton = nextPageButton = null;
         if (options.flag("pages", false)) {
             Button previous = button("←", false, () -> turnPage(-1));
+            previousPageButton = previous;
             previous.setContentDescription(getString(R.string.previous_page));
             navigation.addView(previous, new LinearLayout.LayoutParams(dp(48), compact ? dp(48) : -2));
             space(navigation);
@@ -1233,20 +1248,28 @@ public class MainActivity extends Activity {
         if (options.flag("pages", false)) {
             space(navigation);
             Button next = button("→", false, () -> turnPage(1));
+            nextPageButton = next;
             next.setContentDescription(getString(R.string.next_page));
             navigation.addView(next, new LinearLayout.LayoutParams(dp(48), compact ? dp(48) : -2));
         }
         footer.addView(navigation);
         if (getResources().getConfiguration().screenHeightDp >= 400) {
             LinearLayout tools = row();
-            tools.addView(readerAction("list", tr("Оглавление", "Contents"), this::contents), weight());
+            Button chapters = ReaderNavigation.item(this, options, tr("Главы", "Chapters"), "list", false, this::contents);
+            chapters.setContentDescription(tr("Оглавление", "Contents"));
+            tools.addView(chapters, weight());
             space(tools);
-            tools.addView(readerAction("bookmark", tr("Добавить закладку", "Add bookmark"), this::addBookmark), weight());
+            Button bookmark = ReaderNavigation.item(this, options, tr("Закладка", "Bookmark"), "bookmark", false, this::addBookmark);
+            bookmark.setContentDescription(tr("Добавить закладку", "Add bookmark"));
+            tools.addView(bookmark, weight());
             space(tools);
-            tools.addView(readerAction("sun", tr("Сменить тему: день / ночь", "Change theme: day / night"), () -> {
+            Button theme = ReaderNavigation.item(this, options, tr("Тема", "Theme"), "sun", false, () -> {
                 options.put("theme", options.light() ? 0 : 2); changedOptions();
-            }), weight());
-            Button rsvp = readerAction("speed", getString(R.string.rsvp_action), () -> { focus = true; reader(); });
+            });
+            theme.setContentDescription(tr("Сменить тему: день / ночь", "Change theme: day / night"));
+            tools.addView(theme, weight());
+            Button rsvp = ReaderNavigation.item(this, options, "RSVP", "speed", false, () -> { focus = true; reader(); });
+            rsvp.setContentDescription(getString(R.string.rsvp_action));
             space(tools);
             tools.addView(rsvp, weight());
             gap(footer, 8);
@@ -1379,7 +1402,7 @@ public class MainActivity extends Activity {
         int size = options.number("size", prefs.getInt("typeSize", 21));
         TextView preview = label(excerpt, size, options.ink());
         preview.setTag("text-size-preview");
-        preview.setTypeface(Typeface.create(new String[]{"serif", "sans-serif", "monospace"}[options.number("font", 0)], Typeface.NORMAL));
+        preview.setTypeface(options.typeface(this));
         preview.setLineSpacing(0, options.number("line", 150) / 100f);
         boolean oneLine = quick || shortWindow || getResources().getConfiguration().fontScale >= 1.6f;
         preview.setMaxLines(oneLine || size > 28 ? 1 : 2);
@@ -1512,6 +1535,11 @@ public class MainActivity extends Activity {
     }
     private void updateTextProgress() {
         if (counter == null || current == null) return;
+        if (pageReader != null && previousPageButton != null && nextPageButton != null) {
+            boolean laidOut = pageReader.end() > pageReader.start();
+            previousPageButton.setEnabled(laidOut && pageReader.start() > 0);
+            nextPageButton.setEnabled(laidOut && pageReader.end() < current.text().length());
+        }
         int percent = (int) (100L * anchor / Math.max(1, current.text().length() - 1));
         int chapter = chapterIndex();
         int end = chapter + 1 < current.chapters().size() ? current.chapters().get(chapter + 1).offset() : current.text().length() - 1;
@@ -1832,18 +1860,111 @@ public class MainActivity extends Activity {
         persistOptions();
         if (settingsOpen) {
             settingsY = settingsScroll.getScrollY();
-            settings(settingsRsvp);
+            restoreSettingsPage();
         } else if (current != null && reading != null) reader(); else library();
     }
     private void settingsHeader(String title) {
         LinearLayout top = row();
-        top.addView(readerAction("back", tr("Назад", "Back"), this::back), new LinearLayout.LayoutParams(dp(48), dp(48)));
-        space(top);
+        if (!settingsOverview) {
+            top.addView(readerAction("back", tr("Назад", "Back"), this::back), new LinearLayout.LayoutParams(dp(48), dp(48)));
+            space(top);
+        }
         TextView heading = label(title, 28, options.ink());
         heading.setTypeface(Typeface.DEFAULT_BOLD);
         if (Build.VERSION.SDK_INT >= 28) heading.setAccessibilityHeading(true);
         top.addView(heading, weight());
         root.addView(top, matchWrap());
+    }
+    private void restoreSettingsPage() {
+        if (settingsOverview) settingsOverview();
+        else if (settingsLibrary) sortDialog();
+        else settings(settingsRsvp);
+    }
+    private void settingsOverview() {
+        settingsOpen = settingsOverview = true;
+        settingsLibrary = settingsFromOverview = restoreSettings = false;
+        options = ReaderOptions.load(prefs, null);
+        shell();
+        settingsHeader(getString(R.string.settings));
+        LinearLayout page = settingsPage();
+        LinearLayout reading = settingsGroup(page, "book", tr("Чтение", "Reading"));
+        reading.addView(settingsAction("type", tr("Оформление", "Appearance"),
+                tr("Шрифт, размер текста и поля", "Typeface, text size and margins"), () -> openSettingsSection(() -> settings(false))));
+        settingsDivider(reading);
+        reading.addView(settingsAction("speed", "RSVP",
+                tr("Скорость, паузы и профили", "Speed, pauses and profiles"), () -> openSettingsSection(() -> settings(true))));
+        LinearLayout library = settingsGroup(page, "library", getString(R.string.library));
+        library.addView(settingsAction("sort", tr("Вид и порядок", "View & sort"),
+                grid ? tr("Сетка обложек", "Cover grid") : tr("Список", "List"), () -> openSettingsSection(this::sortDialog)));
+        LinearLayout application = settingsGroup(page, "info", tr("Приложение", "Application"));
+        String[] themes = themeNames();
+        int themeIndex = Math.max(0, Math.min(themes.length - 1, options.number("theme", 0)));
+        application.addView(settingsAction("palette", tr("Тема", "Theme"), themes[themeIndex],
+                () -> chooseDialog(tr("Тема", "Theme"), themes, themeIndex, value -> {
+                    options.put("theme", value); changedOptions();
+                })));
+        settingsDivider(application);
+        application.addView(updateSettingsAction());
+        ReaderNavigation.add(root, options, ReaderNavigation.Tab.SETTINGS, this::navigate);
+        restoreSettingsScroll();
+    }
+    private void openSettingsSection(Runnable open) {
+        settingsFromOverview = true;
+        settingsOverviewY = settingsScroll.getScrollY();
+        settingsY = 0;
+        open.run();
+    }
+    private LinearLayout settingsPage() {
+        settingsScroll = new ScrollView(this);
+        settingsScroll.setVerticalScrollBarEnabled(false);
+        LinearLayout page = column();
+        page.setPadding(0, dp(12), 0, dp(24));
+        settingsScroll.addView(page);
+        root.addView(settingsScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        return page;
+    }
+    private void restoreSettingsScroll() {
+        int y = settingsY;
+        ScrollView scroll = settingsScroll;
+        scroll.post(() -> scroll.scrollTo(0, y));
+    }
+    private LinearLayout settingsAction(String icon, String title, String value, Runnable click) {
+        LinearLayout action = row();
+        action.setMinimumHeight(dp(56));
+        action.setPadding(dp(4), dp(8), dp(4), dp(8));
+        action.setBackground(feedback(shape(options.surface(), 12)));
+        ImageView symbol = new ImageView(this);
+        symbol.setImageDrawable(new ReaderIcon(this, icon, options.ink()));
+        symbol.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        action.addView(symbol, new LinearLayout.LayoutParams(dp(24), dp(24))); space(action);
+        LinearLayout labels = column();
+        labels.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        TextView caption = label(title, 16, options.ink());
+        caption.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        labels.addView(caption);
+        gap(labels, 2);
+        TextView detail = label(value, 13, options.muted()); detail.setTag("setting-value");
+        labels.addView(detail);
+        action.addView(labels, weight()); space(action);
+        ImageView next = new ImageView(this);
+        next.setImageDrawable(new ReaderIcon(this, "next", options.muted()));
+        next.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        action.addView(next, new LinearLayout.LayoutParams(dp(24), dp(24)));
+        action.setContentDescription(title + ". " + value);
+        action.setFocusable(true);
+        action.setOnClickListener(v -> click.run());
+        return action;
+    }
+    private void settingsDivider(LinearLayout group) {
+        View divider = new View(this);
+        divider.setBackgroundColor(options.surfaceHigh());
+        group.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
+    }
+    private View updateSettingsAction() {
+        View row = settingsAction("update", tr("Обновления", "Updates"), tr("Версия ", "Version ") + AppUpdates.version(this),
+                () -> startActivity(new Intent(this, UpdateActivity.class)));
+        row.setTag("updates-entry");
+        return row;
     }
     private LinearLayout settingsGroup(LinearLayout parent, String icon, String title) {
         if (parent.getChildCount() > 0) gap(parent, 20);
@@ -1869,7 +1990,7 @@ public class MainActivity extends Activity {
         return hint;
     }
     private void themeChoices(LinearLayout parent) {
-        String[] names = {tr("Тёмная", "Dark"), tr("Сумерки", "Dusk"), tr("Светлая", "Light"), tr("Сепия", "Sepia")};
+        String[] names = themeNames();
         for (int line = 0; line < 2; line++) {
             LinearLayout row = row();
             for (int col = 0; col < 2; col++) {
@@ -1894,41 +2015,20 @@ public class MainActivity extends Activity {
             gap(parent, 8);
         }
     }
+    private String[] themeNames() { return new String[]{tr("Тёмная", "Dark"), tr("Сумерки", "Dusk"), tr("Светлая", "Light"), tr("Сепия", "Sepia")}; }
     private void settings(boolean rsvp) {
         pause();
         if (!settingsOpen && !restoreSettings) settingsY = 0;
         settingsOpen = true;
+        settingsOverview = false;
         settingsLibrary = false;
         settingsRsvp = rsvp;
         restoreSettings = false;
         fullscreen = false;
         if (current == null) speed = options.number("speed", prefs.getInt("speed", 300));
         shell();
-        settingsHeader(tr("Настройки", "Settings"));
-        gap(root, 8);
-        boolean narrowTabs = getResources().getConfiguration().screenWidthDp < 400;
-        boolean stackedTabs = narrowTabs && getResources().getConfiguration().fontScale >= 1.6f;
-        LinearLayout tabs = stackedTabs ? column() : row();
-        tabs.setPadding(dp(6), dp(6), dp(6), dp(6));
-        tabs.setBackground(shape(options.surface(), 20));
-        Button appearance = selectionButton(tr("Оформление", "Appearance"), !rsvp,
-                () -> { settingsY = 0; settings(false); });
-        tabs.addView(appearance, stackedTabs ? matchWrap() : new LinearLayout.LayoutParams(0, -2, narrowTabs ? 2 : 1));
-        if (stackedTabs) gap(tabs, 8); else space(tabs);
-        Button focusTab = selectionButton("RSVP", rsvp, () -> { settingsY = 0; settings(true); });
-        if (narrowTabs || getResources().getConfiguration().fontScale >= 1.6f) {
-            appearance.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, null, null);
-            focusTab.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, null, null);
-        }
-        tabs.addView(focusTab, stackedTabs ? matchWrap() : weight());
-        root.addView(tabs);
-        gap(root, 8);
-        settingsScroll = new ScrollView(this);
-        settingsScroll.setVerticalScrollBarEnabled(false);
-        LinearLayout page = column();
-        page.setPadding(0, dp(8), 0, dp(24));
-        settingsScroll.addView(page);
-        root.addView(settingsScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        settingsHeader(rsvp ? "RSVP" : tr("Оформление", "Appearance"));
+        LinearLayout page = settingsPage();
         LinearLayout content;
         if (current != null) {
             content = settingsGroup(page, "book", tr("Настройки книги", "Book settings"));
@@ -1956,11 +2056,11 @@ public class MainActivity extends Activity {
         }
         if (!rsvp) {
             content = settingsGroup(page, "book", tr("Чтение", "Reading"));
-            choose(content, tr("Режим чтения", "Reading mode"), new String[]{tr("Прокрутка", "Scroll"), tr("Листание", "Pages")},
+            choose(content, "page", tr("Режим чтения", "Reading mode"), new String[]{tr("Прокрутка", "Scroll"), tr("Листание", "Pages")},
                     options.flag("pages", false) ? 1 : 0,
                     value -> { options.put("pages", value == 1); changedOptions(); });
-            choose(content, tr("Шрифт", "Typeface"), new String[]{tr("С засечками", "Serif"), tr("Без засечек", "Sans serif"), tr("Моноширинный", "Monospace")},
-                    options.number("font", 0), value -> { options.put("font", value); changedOptions(); });
+            choose(content, "type", tr("Шрифт", "Typeface"), new String[]{tr("С засечками", "Serif"), tr("Без засечек", "Sans serif"), tr("Моноширинный", "Monospace"), "Roboto"},
+                    options.fontIndex(), value -> { options.put("font", value); changedOptions(); });
             textSizeControl(content, false);
             range(content, tr("Межстрочный интервал, %", "Line height, %"), 110, 200, options.number("line", 150),
                     value -> { options.put("line", value); changedOptions(); });
@@ -1968,7 +2068,7 @@ public class MainActivity extends Activity {
                     value -> { options.put("hyphenation", value); changedOptions(); });
             content = settingsGroup(page, "palette", tr("Цвет и атмосфера", "Color & atmosphere"));
             themeChoices(content);
-            choose(content, tr("Акцент", "Accent"), new String[]{tr("Лайм", "Lime"), tr("Лёд", "Ice"), tr("Лаванда", "Lavender"), tr("Янтарь", "Amber")},
+            choose(content, "palette", tr("Акцент", "Accent"), new String[]{tr("Лайм", "Lime"), tr("Лёд", "Ice"), tr("Лаванда", "Lavender"), tr("Янтарь", "Amber")},
                     options.number("accent", 0), value -> { options.put("accent", value); changedOptions(); });
             content = settingsGroup(page, "page", tr("Страница", "Page layout"));
             range(content, tr("Поля", "Margins"), 0, 40, options.number("margin", 8),
@@ -1977,10 +2077,12 @@ public class MainActivity extends Activity {
                     value -> { options.put("indent", value); changedOptions(); });
             range(content, tr("Интервал между абзацами", "Paragraph spacing"), 0, 32, options.number("paragraphGap", 8),
                     value -> { options.put("paragraphGap", value); changedOptions(); });
-            choose(content, tr("Выравнивание", "Alignment"), new String[]{tr("По левому краю", "Start"), tr("По ширине", "Justified"), tr("По центру", "Centered")},
+            choose(content, "sort", tr("Выравнивание", "Alignment"), new String[]{tr("По левому краю", "Start"), tr("По ширине", "Justified"), tr("По центру", "Centered")},
                     options.number("alignment", 0), value -> { options.put("alignment", value); changedOptions(); });
             toggle(content, tr("Листать кнопками громкости", "Turn pages with volume keys"), options.flag("volumePages", false),
                     value -> { options.put("volumePages", value); persistOptions(); });
+            toggle(content, tr("Листать касанием края", "Tap page edges to turn"), options.flag("edgeTurns", true),
+                    value -> { options.put("edgeTurns", value); persistOptions(); });
             content.addView(settingsHint(tr("В режиме листания смахните влево или вправо либо нажмите на край страницы. Нажмите по центру, чтобы показать панели. Удерживайте текст, чтобы сохранить цитату.",
                     "In Pages mode, swipe left or right or tap a page edge. Tap the center to show controls. Hold text to save a quote.")), matchWrap());
             content = settingsGroup(page, "sun", tr("Экран", "Display"));
@@ -1998,7 +2100,7 @@ public class MainActivity extends Activity {
             }
             range(content, tr("Размер слова", "Word size"), 24, 64, options.number("rsvpSize", 40),
                     value -> { options.put("rsvpSize", value); changedOptions(); });
-            choose(content, tr("Цвет опорной буквы", "Anchor letter color"), new String[]{tr("Акцент темы", "Theme accent"), tr("Коралловый", "Coral"), tr("Голубой", "Blue")},
+            choose(content, "palette", tr("Цвет опорной буквы", "Anchor letter color"), new String[]{tr("Акцент темы", "Theme accent"), tr("Коралловый", "Coral"), tr("Голубой", "Blue")},
                     options.number("pivotColor", 0), value -> { options.put("pivotColor", value); changedOptions(); });
             toggle(content, tr("Направляющие", "Guides"), options.flag("guides", true),
                     value -> { options.put("guides", value); changedOptions(); });
@@ -2037,28 +2139,13 @@ public class MainActivity extends Activity {
                 }
             }
         }
-        LinearLayout updates = settingsGroup(page, "info", tr("Приложение", "Application"));
-        LinearLayout updateRow = row(); updateRow.setTag("updates-entry");
-        updateRow.setPadding(0, dp(4), 0, dp(4)); updateRow.setMinimumHeight(dp(56));
-        updateRow.setBackground(feedback(shape(options.surface(), 14)));
-        ImageView updateIcon = new ImageView(this); updateIcon.setImageDrawable(new ReaderIcon(this, "update", options.accent()));
-        updateIcon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        updateRow.addView(updateIcon, new LinearLayout.LayoutParams(dp(24), dp(24))); space(updateRow);
-        LinearLayout updateText = column(); updateText.addView(label(tr("Обновления", "Updates"), 16, options.ink())); gap(updateText, 4);
-        updateText.addView(label(tr("Версия ", "Version ") + AppUpdates.version(this), 13, options.muted()));
-        updateRow.addView(updateText, weight()); space(updateRow);
-        ImageView updateArrow = new ImageView(this); updateArrow.setImageDrawable(new ReaderIcon(this, "next", options.muted()));
-        updateArrow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        updateRow.addView(updateArrow, new LinearLayout.LayoutParams(dp(24), dp(24)));
-        updateRow.setContentDescription(tr("Обновления. Версия ", "Updates. Version ") + AppUpdates.version(this));
-        updateRow.setFocusable(true); updateRow.setOnClickListener(v -> startActivity(new Intent(this, UpdateActivity.class)));
-        updates.addView(updateRow, matchWrap());
-        int scrollY = settingsY;
-        ScrollView scroll = settingsScroll;
-        scroll.post(() -> scroll.scrollTo(0, scrollY));
+        settingsGroup(page, "info", tr("Приложение", "Application")).addView(updateSettingsAction());
+        restoreSettingsScroll();
     }
     private class FocusView extends View {
         final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        final Typeface typeface = options.fontIndex() == 3 ? options.typeface(MainActivity.this)
+                : Typeface.create("sans-serif-medium", Typeface.NORMAL);
         FocusView() { super(MainActivity.this); setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES); }
         @Override protected void onDraw(Canvas canvas) {
             float center = getWidth() / 2f, baseline = getHeight() / 2f + dp(12);
@@ -2073,7 +2160,7 @@ public class MainActivity extends Activity {
             String word = countdown > 0 ? String.valueOf(countdown) : reading.words.get(position);
             int pivot = ReadingText.pivot(word), end = word.offsetByCodePoints(pivot, 1);
             String left = word.substring(0, pivot), middle = word.substring(pivot, end), right = word.substring(end);
-            paint.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            paint.setTypeface(typeface);
             float textSize = options.number("rsvpSize", 40) * getResources().getDisplayMetrics().scaledDensity;
             paint.setTextSize(textSize);
             float extent = Math.max(paint.measureText(left), paint.measureText(right)) + paint.measureText(middle) / 2;
@@ -2322,56 +2409,25 @@ public class MainActivity extends Activity {
         });
         parent.addView(controls); gap(parent, 16);
     }
-    private void choose(LinearLayout parent, String caption, String[] items, int selected, IntConsumer change) {
-        TextView heading = label(caption, 14, options.muted());
-        parent.addView(heading);
+    private void choose(LinearLayout parent, String icon, String caption, String[] items, int selected, IntConsumer change) {
+        int[] current = {selected};
+        LinearLayout action = settingsAction(icon, caption, items[selected], () -> {});
+        action.setOnClickListener(v -> chooseDialog(caption, items, current[0], value -> {
+            current[0] = value;
+            ((TextView) action.findViewWithTag("setting-value")).setText(items[value]);
+            action.setContentDescription(caption + ". " + items[value]);
+            change.accept(value);
+        }));
+        parent.addView(action, matchWrap());
+        settingsDivider(parent);
         gap(parent, 8);
-        LinearLayout choices = column();
-        Button selectedValue = button(items[selected], false, () -> {});
-        selectedValue.setTextSize(16);
-        selectedValue.setCompoundDrawablePadding(dp(12));
-        selectedValue.setBackground(feedback(shape(options.background(), 14)));
-        selectedValue.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        selectedValue.setContentDescription(caption + " · " + items[selected]);
-        setSelectorExpanded(selectedValue, choices, false);
-        selectedValue.setOnClickListener(view -> setSelectorExpanded(selectedValue, choices, choices.getVisibility() != View.VISIBLE));
-        parent.addView(selectedValue, matchWrap());
-        gap(parent, 8);
-        for (int index = 0; index < items.length; index++) {
-            final int value = index;
-            boolean activeChoice = selected == index;
-            Button choice = button(items[index], activeChoice ? options.onSelection() : options.ink(),
-                    activeChoice ? options.selection() : options.background(), 12, () -> {
-                for (int child = 0; child < choices.getChildCount(); child += 2) {
-                    Button other = (Button) choices.getChildAt(child);
-                    boolean active = child / 2 == value;
-                    other.setSelected(active);
-                    other.setTextColor(active ? options.onSelection() : options.ink());
-                    other.setBackground(feedback(shape(active ? options.selection() : options.background(), 12)));
-                    other.setText((active ? "✓  " : "") + items[child / 2]);
-                }
-                boolean focused = choices.hasFocus();
-                setSelectorExpanded(selectedValue, choices, false);
-                selectedValue.setText(items[value]);
-                selectedValue.setContentDescription(caption + " · " + items[value]);
-                if (focused) selectedValue.requestFocus();
-                change.accept(value);
-            });
-            choice.setText((index == selected ? "✓  " : "") + items[index]);
-            choice.setSelected(index == selected);
-            choice.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-            choice.setContentDescription(caption + " · " + items[index]);
-            choices.addView(choice, matchWrap());
-            gap(choices, 8);
-        }
-        parent.addView(choices);
-        gap(parent, 12);
     }
-    private void setSelectorExpanded(Button control, LinearLayout choices, boolean expanded) {
-        choices.setVisibility(expanded ? View.VISIBLE : View.GONE);
-        control.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, new ControlIcon(expanded ? "⌃" : "⌄", options.muted()), null);
-        if (Build.VERSION.SDK_INT >= 30)
-            control.setStateDescription(expanded ? tr("Развёрнуто", "Expanded") : tr("Свёрнуто", "Collapsed"));
+    private void chooseDialog(String title, String[] items, int selected, IntConsumer change) {
+        String[] labels = items.clone();
+        labels[selected] = "✓  " + labels[selected];
+        dialogs().setTitle(title).setItems(labels, (dialog, which) -> {
+            if (which != selected) change.accept(which);
+        }).show();
     }
     private void toggle(LinearLayout parent, String title, boolean checked, java.util.function.Consumer<Boolean> change) {
         Button control = button(title, false, () -> {});
