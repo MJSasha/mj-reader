@@ -1451,16 +1451,18 @@ public class ReaderSmokeTest extends Instrumentation {
     }
     private void assertChrome(Activity activity, ListView list) {
         runOnMainSync(() -> {
-            TextView brand = find(activity.getWindow().getDecorView(), activity instanceof MainActivity
-                    ? activity.getString(R.string.library) : "MJ / READER");
+            boolean russian = activity.getResources().getConfiguration().getLocales().get(0).getLanguage().equals("ru");
+            String heading = activity instanceof MainActivity ? activity.getString(R.string.library)
+                    : (russian ? "Флибуста" : "Flibusta");
+            TextView title = find(activity.getWindow().getDecorView(), heading);
             android.graphics.Rect visible = new android.graphics.Rect();
-            if (brand == null || !brand.getGlobalVisibleRect(visible) || visible.height() < brand.getHeight())
+            if (title == null || !title.getGlobalVisibleRect(visible) || visible.height() < title.getHeight())
                 throw new AssertionError("Masthead scrolled away");
             int[] top = new int[2], body = new int[2], bottom = new int[2];
-            brand.getLocationOnScreen(top); list.getLocationOnScreen(body);
+            title.getLocationOnScreen(top); list.getLocationOnScreen(body);
             ViewGroup root = (ViewGroup) field(activity, "root");
             View dock = root.getChildAt(root.getChildCount() - 1); dock.getLocationOnScreen(bottom);
-            if (body[1] < top[1] + brand.getHeight() || body[1] + list.getHeight() >= bottom[1])
+            if (body[1] < top[1] + title.getHeight() || body[1] + list.getHeight() >= bottom[1])
                 throw new AssertionError("Content overlaps masthead or bottom actions");
         });
     }
