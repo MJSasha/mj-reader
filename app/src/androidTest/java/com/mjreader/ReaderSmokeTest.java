@@ -1170,6 +1170,7 @@ public class ReaderSmokeTest extends Instrumentation {
             screen = resize(screen, "800x900"); pages = awaitPages(screen);
             if (pages.columns() != 2 || pages.start() != saved || pages.visiblePages().size() != 2
                     || pages.visiblePages().get(0).end() != pages.visiblePages().get(1).start()) throw new AssertionError("Broken unfolded spread");
+            awaitSpreadOnDisplay(screen);
             capture("pages-spread-dark");
             checkReadingGestures(screen);
             checkPageAnimation(screen, "spread-dark");
@@ -1259,6 +1260,21 @@ public class ReaderSmokeTest extends Instrumentation {
             prefs.edit().putString("options", oldOptions).commit();
             shell("wm size 430x932"); shell("settings put system font_scale 1.0"); shell("settings put global animator_duration_scale 1");
         }
+    }
+    private void awaitSpreadOnDisplay(MainActivity activity) {
+        int background = ((ReaderOptions) field(activity, "options")).background();
+        // A resized view can be ready while Android still displays the previous phone frame.
+        for (int attempt = 0; attempt < 40; attempt++) {
+            android.graphics.Bitmap frame = getUiAutomation().takeScreenshot();
+            if (frame != null) {
+                boolean visible = frame.getWidth() == 800 && frame.getHeight() == 900
+                        && frame.getPixel(frame.getWidth() - 8, frame.getHeight() / 2) == background;
+                frame.recycle();
+                if (visible) return;
+            }
+            android.os.SystemClock.sleep(100);
+        }
+        throw new AssertionError("Resized spread did not reach the display");
     }
     private void checkReadingGestures(MainActivity activity) throws Exception {
         checkControlsMotion(activity);
