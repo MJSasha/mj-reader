@@ -137,10 +137,7 @@ public class MainActivity extends Activity {
                     if (isDestroyed()) return;
                     books = loaded;
                     finishLibraryLoading(state);
-                    if (startup != null && !isFinishing()) startup.reveal(() -> {
-                        dismissStartup();
-                        if (!isFinishing() && current == null && !settingsOpen) automaticUpdates();
-                    });
+                    revealStartup();
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
@@ -151,6 +148,21 @@ public class MainActivity extends Activity {
                     }
                     message(tr("Ошибка загрузки", "Loading failed"), e.toString());
                 });
+            }
+        });
+    }
+    private void revealStartup() {
+        StartupBanner banner = startup;
+        if (banner == null || isFinishing()) return;
+        banner.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
+            @Override public boolean onPreDraw() {
+                if (startup == banner && !isFinishing() && (root == null || !root.isLaidOut())) return true;
+                banner.getViewTreeObserver().removeOnPreDrawListener(this);
+                if (startup == banner && !isFinishing()) banner.reveal(() -> {
+                    dismissStartup();
+                    if (!isFinishing() && current == null && !settingsOpen) automaticUpdates();
+                });
+                return true;
             }
         });
     }

@@ -15,6 +15,8 @@ import org.json.*;
 
 public class ReaderSmokeTest extends Instrumentation {
     private String updateFixture;
+    private volatile boolean watchStartup;
+    private android.animation.ValueAnimator startupReveal;
     private boolean updatesOnly, visualOnly, sampleOnly, readerOnly, benchmarkOnly, catalogOnly, liveCatalog, adaptiveOnly, motionOnly, showcaseOnly;
     @Override public void onCreate(Bundle arguments) {
         super.onCreate(arguments);
@@ -1103,19 +1105,39 @@ public class ReaderSmokeTest extends Instrumentation {
         }
         throw new AssertionError("Pages were not laid out");
     }
+    @Override public void callActivityOnCreate(Activity activity, Bundle state) {
+        super.callActivityOnCreate(activity, state);
+        if (!watchStartup || !(activity instanceof MainActivity)) return;
+        View decor = activity.getWindow().getDecorView();
+        decor.getViewTreeObserver().addOnDrawListener(new ViewTreeObserver.OnDrawListener() {
+            @Override public void onDraw() {
+                StartupBanner banner = (StartupBanner) field(activity, "startup");
+                if (banner == null || !(field(banner, "reveal") instanceof android.animation.ValueAnimator reveal)) return;
+                if (startupReveal == null) {
+                    reveal.pause();
+                    startupReveal = reveal;
+                    // OnDrawListener cannot be removed during draw dispatch.
+                    decor.post(() -> decor.getViewTreeObserver().removeOnDrawListener(this));
+                }
+            }
+        });
+    }
     private void startupCheck(Context context) throws Exception {
         Intent launch = new Intent(Intent.ACTION_MAIN).setClass(context, MainActivity.class)
                 .addCategory(Intent.CATEGORY_LAUNCHER).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        MainActivity activity = (MainActivity) startActivitySync(launch);
+        watchStartup = true;
+        MainActivity activity;
+        try { activity = (MainActivity) startActivitySync(launch); }
+        finally { watchStartup = false; }
         try {
             boolean[] checked = {false};
             for (int attempt = 0; attempt < 200 && !checked[0]; attempt++) {
                 runOnMainSync(() -> {
                     StartupBanner banner = (StartupBanner) field(activity, "startup");
-                    if (banner == null || !(field(banner, "reveal") instanceof android.animation.ValueAnimator reveal)) return;
+                    if (banner == null || startupReveal == null) return;
+                    android.animation.ValueAnimator reveal = startupReveal;
                     View library = (View) field(activity, "root");
                     if (!library.isLaidOut()) return;
-                    reveal.pause();
                     reveal.setCurrentFraction(.5f);
                     if (banner.getAlpha() <= 0f || banner.getAlpha() >= 1f || banner.getChildAt(0).getScaleX() <= 1f
                             || library.getParent() != banner.getParent() || library.getAlpha() != 1f || library.getScaleX() != 1f
@@ -1129,8 +1151,8 @@ public class ReaderSmokeTest extends Instrumentation {
                 });
                 if (!checked[0]) Thread.sleep(10);
             }
-            if (!checked[0]) throw new AssertionError("Missing animated startup reveal");
-        } finally { runOnMainSync(activity::finish); }
+            if (!checked[0]) throw new AssertionError("Missing animated startup reveal on a drawn frame");
+        } finally { runOnMainSync(() -> { startupReveal = null; activity.finish(); }); }
     }
     private void pagesCheck() throws Exception {
         Context context = getTargetContext();
