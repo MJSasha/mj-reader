@@ -1,5 +1,6 @@
 <resources>
     <string name="library">Библиотека</string>
+    <string name="loading_books">Загружаем книги…</string>
     <string name="add_book">Добавить книгу</string>
     <string name="demo_author">Рассказ MJReader</string>
     <string name="importing">Открываем книгу…</string>

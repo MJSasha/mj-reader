@@ -38,7 +38,7 @@ public class ReaderSmokeTest extends Instrumentation {
             AppUpdates.prefs(context).edit().putBoolean("automatic", false).commit();
             if (updatesOnly) { new UpdateCheck(this).run(updateFixture); result.putString("stream", "PASS: OTA release selection, checksum/signature/version rejection, daily check limit, themed UI and persisted download cancellation\n"); finish(Activity.RESULT_OK, result); return; }
             if (showcaseOnly) { showcase(); result.putString("stream", "PASS: original demonstration screenshots\n"); finish(Activity.RESULT_OK, result); return; }
-            if (motionOnly) { pagesCheck(); result.putString("stream", "PASS: reader controls motion, rapid reversals, anchors, edge taps, page slides, phone/spread, light/dark, large fonts and reduced motion\n"); finish(Activity.RESULT_OK, result); return; }
+            if (motionOnly) { pagesCheck(); result.putString("stream", "PASS: reader controls motion, rapid reversals, anchors, page swipes, edge taps, page slides, phone/spread, light/dark, large fonts and reduced motion\n"); finish(Activity.RESULT_OK, result); return; }
             if (adaptiveOnly) { narrowScreenCheck(); adaptiveCheck(); pagesCheck(); result.putString("stream", "PASS: narrow 320/360 dp and Flip 7 proportions, RU/EN labels, phone/Fold/tablet resize, grid, reader position/fullscreen, EPUB illustration repair, exact page seams, one/two-page reflow, catalog retention, hover/focus and touch targets\n"); finish(Activity.RESULT_OK, result); return; }
             if (catalogOnly) { new CatalogCheck(this).run(liveCatalog); result.putString("stream", "PASS: OPDS failover, HTTPS EPUB download, cover/chapters import, cancellation/retry, background import, themed UI and recreation\n"); finish(Activity.RESULT_OK, result); return; }
             if (benchmarkOnly) {
@@ -108,7 +108,7 @@ public class ReaderSmokeTest extends Instrumentation {
                 throw new AssertionError("Cover blocked chapter repair");
             android.content.SharedPreferences prefs = context.getSharedPreferences("reader", 0);
             prefs.edit().putBoolean("grid", true).remove("favorite.demo-en").remove("options.demo-en").remove("options.demo-ru").putInt("anchor.demo-en", 0).putInt("anchor.demo-ru", 0).putString("options", "{\"countdown\":false}").apply();
-            MainActivity activity = startStableMain(context);
+            MainActivity activity = startStableMain(context, true);
             waitForIdleSync();
             awaitField(activity, "librarySearch");
             // Reimport is an action on this book, not a second unrestricted Add book flow.
@@ -549,17 +549,23 @@ public class ReaderSmokeTest extends Instrumentation {
     }
     private void libraryConvenienceCheck() throws Exception {
         Context context = getTargetContext(); var prefs = context.getSharedPreferences("reader", 0);
+        Books.Book recent = new Books(context).list().stream().filter(book -> book.id().equals("demo-en")).findFirst().orElseThrow();
+        int savedAnchor = recent.text().length() / 3;
+        int expectedProgress = 100 * savedAnchor / (recent.text().length() - 1);
         String[] keys = {"opened.demo-en", "status.demo-en", "anchor.demo-en", "deleted.demo-en"};
         var saved = new java.util.HashMap<String, Object>();
         for (String key : keys) if (prefs.contains(key)) saved.put(key, prefs.getAll().get(key));
         MainActivity activity = null;
         try {
-            prefs.edit().putLong(keys[0], Long.MAX_VALUE).putString(keys[1], "reading").putInt(keys[2], 120).putBoolean(keys[3], false).commit();
+            prefs.edit().putLong(keys[0], Long.MAX_VALUE).putString(keys[1], "reading").putInt(keys[2], savedAnchor).putBoolean(keys[3], false).commit();
             activity = startStableMain(context);
             awaitField(activity, "librarySearch"); MainActivity screen = activity;
             runOnMainSync(() -> {
                 View resume = screen.getWindow().getDecorView().findViewWithTag("continue-reading");
                 if (resume == null || !resume.getContentDescription().toString().contains("The Quiet Orbit")) throw new AssertionError("Missing most recent reading book");
+                android.widget.ProgressBar progress = resume.findViewWithTag("continue-progress");
+                if (progress == null || progress.getMax() != 100 || progress.getProgress() != expectedProgress)
+                    throw new AssertionError("Resume progress differs from the saved position");
                 View shelf = screen.getWindow().getDecorView().findViewWithTag("library-shelf");
                 int[] position = new int[2]; shelf.getLocationOnScreen(position);
                 if (position[1] >= 360 * screen.getResources().getDisplayMetrics().density)
@@ -578,7 +584,7 @@ public class ReaderSmokeTest extends Instrumentation {
                 resume.performClick();
             });
             awaitField(screen, "reading"); waitForIdleSync();
-            if (!((Books.Book) field(screen, "current")).id().equals("demo-en") || Math.abs((int) field(screen, "anchor") - 120) > 100)
+            if (!((Books.Book) field(screen, "current")).id().equals("demo-en") || Math.abs((int) field(screen, "anchor") - savedAnchor) > 100)
                 throw new AssertionError("Resume did not restore the saved book/position");
             runOnMainSync(() -> invoke(screen, "library")); waitForIdleSync();
             click(screen, "Reading"); waitForIdleSync();
@@ -1129,7 +1135,7 @@ public class ReaderSmokeTest extends Instrumentation {
             ReaderText.Picture[] pictures = first.getSpans(0, pages.visiblePages().get(0).end(), ReaderText.Picture.class);
             if (pictures.length == 0 || pictures[0].bitmap == null) throw new AssertionError("Visible illustration not decoded");
             capture("pages-illustration-dark");
-            checkEdgeTaps(opened);
+            checkReadingGestures(opened);
 
             for (int theme : new int[]{2, 0}) {
                 runOnMainSync(() -> {
@@ -1165,7 +1171,7 @@ public class ReaderSmokeTest extends Instrumentation {
             if (pages.columns() != 2 || pages.start() != saved || pages.visiblePages().size() != 2
                     || pages.visiblePages().get(0).end() != pages.visiblePages().get(1).start()) throw new AssertionError("Broken unfolded spread");
             capture("pages-spread-dark");
-            checkEdgeTaps(screen);
+            checkReadingGestures(screen);
             checkPageAnimation(screen, "spread-dark");
             ReaderPages unfolded = pages;
             runOnMainSync(() -> unfolded.turn(-1)); pages = awaitPages(screen);
@@ -1210,7 +1216,7 @@ public class ReaderSmokeTest extends Instrumentation {
             for (String size : new String[]{"430x932", "740x360"}) {
                 shell("wm size " + size); shell("settings put system font_scale 2.0"); shell("settings put global animator_duration_scale 0");
                 prefs.edit().putString("options", "{\"pages\":true,\"theme\":2,\"size\":21}").putInt("anchor." + book.id(), 0).commit();
-                screen = startStableMain(context);
+                screen = startStableMain(context, true);
                 awaitField(screen, "librarySearch"); MainActivity large = screen;
                 runOnMainSync(() -> invoke(large, "open", new Class[]{Books.Book.class, boolean.class}, fixture, false));
                 pages = awaitPages(screen);
@@ -1226,6 +1232,9 @@ public class ReaderSmokeTest extends Instrumentation {
                         throw new AssertionError("Compact progress lost its full accessible description");
                 }
                 runOnMainSync(() -> {
+                    boolean[] startupReady = {false};
+                    new StartupBanner(large).whenReady(() -> startupReady[0] = true);
+                    if (!startupReady[0]) throw new AssertionError("Startup waits for animation with reduced motion");
                     int anchor = (int) field(large, "anchor");
                     invoke(large, "setFullscreen", new Class[]{boolean.class}, true);
                     if (field(large, "controlsAnimation") != null)
@@ -1236,10 +1245,12 @@ public class ReaderSmokeTest extends Instrumentation {
                 });
                 pages = awaitPages(large);
                 capture("pages-large-light-" + size);
-                ReaderPages still = pages; int nextPage = pages.end();
-                runOnMainSync(() -> still.turn(1)); pages = awaitPages(large);
+                int nextPage = pages.end();
+                float distance = 56 * large.getResources().getDisplayMetrics().density / pages.getWidth();
+                swipeReading(large, .6f, .5f, .6f - distance, .5f, 1500);
+                pages = awaitPages(large);
                 if (field(pages, "pageTurn") != null || pages.start() != nextPage)
-                    throw new AssertionError("Reduced motion must switch pages immediately");
+                    throw new AssertionError("A slow swipe must switch pages immediately in reduced motion");
                 runOnMainSync(large::finish); screen = null;
             }
         } finally {
@@ -1249,11 +1260,20 @@ public class ReaderSmokeTest extends Instrumentation {
             shell("wm size 430x932"); shell("settings put system font_scale 1.0"); shell("settings put global animator_duration_scale 1");
         }
     }
-    private void checkEdgeTaps(MainActivity activity) throws Exception {
+    private void checkReadingGestures(MainActivity activity) throws Exception {
         checkControlsMotion(activity);
         for (boolean fullscreen : new boolean[]{false, true}) {
             ReaderPages pages = awaitPages(activity);
             int start = pages.start(), end = pages.end();
+            swipeReading(activity, .85f, .5f, .15f, .5f, 250);
+            if (awaitPages(activity).start() != end || (boolean) field(activity, "fullscreen") != fullscreen)
+                throw new AssertionError("Left swipe must turn forward without toggling panels");
+            swipeReading(activity, .15f, .5f, .85f, .5f, 250);
+            if (awaitPages(activity).start() != start || (boolean) field(activity, "fullscreen") != fullscreen)
+                throw new AssertionError("Right swipe must return without toggling panels");
+            swipeReading(activity, .62f, .28f, .38f, .72f, 250);
+            if (awaitPages(activity).start() != start || (boolean) field(activity, "fullscreen") != fullscreen)
+                throw new AssertionError("A mostly vertical drag must keep the page and controls in place");
             tapReading(activity, .9f); pages = awaitPages(activity);
             if (pages.start() != end || (boolean) field(activity, "fullscreen") != fullscreen)
                 throw new AssertionError("Right edge must turn forward without toggling panels");
@@ -1264,6 +1284,14 @@ public class ReaderSmokeTest extends Instrumentation {
             if (pages.start() != start || (boolean) field(activity, "fullscreen") == fullscreen)
                 throw new AssertionError("Center must toggle panels without turning a page");
         }
+    }
+    private void swipeReading(MainActivity activity, float fromX, float fromY, float toX, float toY, int duration)
+            throws Exception {
+        int[] bounds = readingViewport(activity);
+        shell("input swipe " + (bounds[0] + Math.round(bounds[2] * fromX)) + " "
+                + (bounds[1] + Math.round(bounds[3] * fromY)) + " "
+                + (bounds[0] + Math.round(bounds[2] * toX)) + " "
+                + (bounds[1] + Math.round(bounds[3] * toY)) + " " + duration);
     }
     private void checkControlsMotion(MainActivity activity) throws Exception {
         int anchor = (int) field(activity, "anchor");
@@ -1324,7 +1352,12 @@ public class ReaderSmokeTest extends Instrumentation {
         return bounds;
     }
     private MainActivity startStableMain(Context context) throws Exception {
-        MainActivity initial = (MainActivity) startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        return startStableMain(context, false);
+    }
+    private MainActivity startStableMain(Context context, boolean launcher) throws Exception {
+        Intent intent = new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (launcher) intent.setAction(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        MainActivity initial = (MainActivity) startActivitySync(intent);
         MainActivity previous = null;
         int stable = 0;
         for (int i = 0; i < 200; i++) {

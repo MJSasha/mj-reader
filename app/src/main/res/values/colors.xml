@@ -1,3 +1,4 @@
 <resources>
     <color name="mj_icon_background">#141925</color>
+    <color name="mj_startup_background">#0C0E15</color>
 </resources>

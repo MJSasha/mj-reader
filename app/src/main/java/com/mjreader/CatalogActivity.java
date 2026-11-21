@@ -125,14 +125,15 @@ public class CatalogActivity extends Activity {
         getWindow().getDecorView().setSystemUiVisibility(theme.light() ? View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR : 0);
         setContentView(root); root.requestApplyInsets();
         LinearLayout mast = row(); mast.addView(iconButton(tr("Назад", "Back"), "back", this::back));
-        TextView brand = text("MJ / READER", 12, theme.accent()); brand.setLetterSpacing(.16f); brand.setGravity(Gravity.CENTER);
-        mast.addView(brand, new LinearLayout.LayoutParams(0, -1, 1));
+        space(mast);
+        TextView title = text(downloads ? tr("Загрузки", "Downloads") : tr("Флибуста", "Flibusta"), 24, theme.ink());
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        if (Build.VERSION.SDK_INT >= 28) title.setAccessibilityHeading(true);
+        mast.addView(title, weight());
+        space(mast);
         mast.addView(iconButton(tr("Настройки каталога", "Catalog settings"), "settings", this::catalogSettings)); root.addView(mast);
         View mastDivider = new View(this); mastDivider.setBackgroundColor(theme.surface());
         root.addView(mastDivider, new LinearLayout.LayoutParams(-1, dp(1))); gap(root, 16);
-        if (getResources().getConfiguration().screenHeightDp >= 600) {
-            root.addView(text(downloads ? tr("Загрузки", "Downloads") : tr("Флибуста", "Flibusta"), 32, theme.ink())); gap(root, 18);
-        }
         content = column(); root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
         LinearLayout dock = row(); dock.setPadding(dp(8), dp(8), dp(8), dp(8));
         dock.setBackground(shape(theme.surface(), 20));
@@ -150,9 +151,9 @@ public class CatalogActivity extends Activity {
         generation++; if (task != null) task.cancel(true); pendingUrl = ""; busy = false; loadingMore = false; downloads = value; render(); handler.removeCallbacks(refresh); handler.post(refresh);
     }
     private void searchPage() {
-        LinearLayout searchBox = row(); searchBox.setBackground(shape(theme.surface(), 18)); searchBox.setPadding(dp(4), dp(2), dp(4), dp(2));
+        LinearLayout searchBox = row(); searchBox.setBackground(shape(theme.surfaceHigh(), 16)); searchBox.setPadding(dp(4), dp(2), dp(4), dp(2));
         input = field(query, authors ? tr("Фамилия автора", "Author's name") : tr("Найти книгу", "Find a book"));
-        input.setBackground(theme.feedback(shape(theme.surface(), 14), getResources().getDisplayMetrics().density));
+        input.setBackground(theme.feedback(shape(theme.surfaceHigh(), 12), getResources().getDisplayMetrics().density));
         input.setImeOptions(EditorInfo.IME_ACTION_SEARCH | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
         input.setOnEditorActionListener((v, action, event) -> { if (action == EditorInfo.IME_ACTION_SEARCH) { search(); return true; } return false; });
         searchBox.addView(input, new LinearLayout.LayoutParams(0, -2, 1));
@@ -505,8 +506,10 @@ public class CatalogActivity extends Activity {
         button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL); return button;
     }
     private View navItem(String label, String icon, boolean selected, Runnable action) {
-        Button button = control(label, icon, selected, action);
-        int color = selected ? theme.onAccent() : theme.muted();
+        Button button = control(label, icon, false, action);
+        int color = selected ? theme.onSelection() : theme.muted();
+        button.setBackground(theme.feedback(shape(selected ? theme.selection() : theme.surface(), 12),
+                getResources().getDisplayMetrics().density));
         button.setTextColor(color); button.setSelected(selected); button.setGravity(Gravity.CENTER);
         button.setTextSize(14);
         if (getResources().getConfiguration().screenWidthDp < 400

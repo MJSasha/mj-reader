@@ -25,6 +25,8 @@ final class ReaderPages extends View {
     private List<Page> pages = List.of();
     private int anchor, end, generation;
     private boolean loading;
+    private boolean swipeCandidate;
+    private float downX, downY;
     private PageTurn pageTurn;
     private final Paint rule = new Paint();
     record Page(int start, int end, StaticLayout layout, int sourceStart, int top) {}
@@ -44,8 +46,14 @@ final class ReaderPages extends View {
         setOnClickListener(v -> center.run());
         setOnLongClickListener(v -> { paragraph.accept(this.anchor); return true; });
         gestures = new GestureDetector(context, new GestureDetector.SimpleOnGestureListener() {
-            @Override public boolean onDown(MotionEvent event) { return true; }
+            @Override public boolean onDown(MotionEvent event) {
+                downX = event.getX();
+                downY = event.getY();
+                swipeCandidate = true;
+                return true;
+            }
             @Override public boolean onSingleTapUp(MotionEvent event) {
+                swipeCandidate = false;
                 if (!ready()) return true;
                 if (note.test(noteOffsetAt(event.getX(), event.getY()))) return true;
                 if (event.getX() < getWidth() * .25f) turn(-1);
@@ -54,6 +62,7 @@ final class ReaderPages extends View {
                 return true;
             }
             @Override public void onLongPress(MotionEvent event) {
+                swipeCandidate = false;
                 paragraph.accept(offsetAt(event.getX(), event.getY()));
             }
         });
@@ -78,7 +87,21 @@ final class ReaderPages extends View {
     }
     @Override protected void onDetachedFromWindow() { generation++; finishTurn(); super.onDetachedFromWindow(); }
     @Override public boolean performClick() { super.performClick(); return true; }
-    @Override public boolean onTouchEvent(MotionEvent event) { return gestures.onTouchEvent(event) || super.onTouchEvent(event); }
+    @Override public boolean onTouchEvent(MotionEvent event) {
+        gestures.onTouchEvent(event);
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_CANCEL -> swipeCandidate = false;
+            case MotionEvent.ACTION_UP -> {
+                // Use distance on release so a slow drag can turn the page as well.
+                float dx = event.getX() - downX;
+                float dy = event.getY() - downY;
+                if (swipeCandidate && Math.abs(dx) >= dp(48) && Math.abs(dx) > Math.abs(dy) * 1.5f)
+                    turn(dx < 0 ? 1 : -1);
+                swipeCandidate = false;
+            }
+        }
+        return true;
+    }
     void turn(int direction) {
         if (!ready()) return;
         if (direction > 0 && end < book.text().length()) {

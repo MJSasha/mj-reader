@@ -1,5 +1,7 @@
 <resources>
     <string name="library">Library</string>
+    <string name="startup_title" translatable="false">MJReader</string>
+    <string name="loading_books">Loading books…</string>
     <string name="add_book">Add book</string>
     <string name="demo_author">MJReader original</string>
     <string name="importing">Opening book…</string>

@@ -1,6 +1,7 @@
 package com.mjreader;
 
 import android.content.SharedPreferences;
+import android.graphics.Color;
 import org.json.JSONObject;
 
 final class ReaderOptions {
@@ -23,6 +24,14 @@ final class ReaderOptions {
     }
     boolean light() { return number("theme", 0) >= 2; }
     int surface() { return switch (number("theme", 0)) { case 1 -> 0xFF342E46; case 2 -> 0xFFEAEDE6; case 3 -> 0xFFE6D8BC; default -> 0xFF191E29; }; }
+    int surfaceHigh() {
+        return switch (number("theme", 0)) {
+            case 1 -> 0xFF423A56;
+            case 2 -> 0xFFE1E5DC;
+            case 3 -> 0xFFD9CAAC;
+            default -> 0xFF242B39;
+        };
+    }
     int ink() { return light() ? 0xFF20251F : number("theme", 0) == 1 ? 0xFFF3EEF7 : 0xFFF0F2EC; }
     int muted() { return light() ? 0xFF4D584E : number("theme", 0) == 1 ? 0xFFC3B8D2 : 0xFFABB5C5; }
     int accent() {
@@ -30,6 +39,14 @@ final class ReaderOptions {
         int[] light = {0xFF345A05, 0xFF07577A, 0xFF64348A, 0xFF785000};
         return (light() ? light : dark)[Math.max(0, Math.min(3, number("accent", 0)))];
     }
+    int selection() {
+        int surface = surface(), accent = accent();
+        return Color.rgb(
+                (7 * Color.red(surface) + Color.red(accent)) / 8,
+                (7 * Color.green(surface) + Color.green(accent)) / 8,
+                (7 * Color.blue(surface) + Color.blue(accent)) / 8);
+    }
+    int onSelection() { return light() ? ink() : accent(); }
     android.graphics.drawable.Drawable feedback(android.graphics.drawable.GradientDrawable normal, float density) {
         android.graphics.drawable.GradientDrawable pressed = (android.graphics.drawable.GradientDrawable) normal.getConstantState().newDrawable().mutate();
         int base = normal.getColor().getDefaultColor(), overlay = light() ? 0 : 255;
