@@ -53,7 +53,6 @@ final class ReaderPages extends View {
                 return true;
             }
             @Override public boolean onSingleTapUp(MotionEvent event) {
-                swipeCandidate = false;
                 if (!ready()) return true;
                 if (note.test(noteOffsetAt(event.getX(), event.getY()))) return true;
                 if (event.getX() < getWidth() * .25f) turn(-1);
@@ -87,19 +86,26 @@ final class ReaderPages extends View {
     }
     @Override protected void onDetachedFromWindow() { generation++; finishTurn(); super.onDetachedFromWindow(); }
     @Override public boolean performClick() { super.performClick(); return true; }
+    @android.annotation.SuppressLint("ClickableViewAccessibility") // GestureDetector routes center taps to performClick.
     @Override public boolean onTouchEvent(MotionEvent event) {
-        gestures.onTouchEvent(event);
-        switch (event.getActionMasked()) {
-            case MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_CANCEL -> swipeCandidate = false;
-            case MotionEvent.ACTION_UP -> {
-                // Use distance on release so a slow drag can turn the page as well.
-                float dx = event.getX() - downX;
-                float dy = event.getY() - downY;
-                if (swipeCandidate && Math.abs(dx) >= dp(48) && Math.abs(dx) > Math.abs(dy) * 1.5f)
-                    turn(dx < 0 ? 1 : -1);
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_UP && swipeCandidate) {
+            // Resolve the drag before tap detection, even if intermediate move events were coalesced.
+            float dx = event.getX() - downX;
+            float dy = event.getY() - downY;
+            if (Math.abs(dx) >= dp(48) && Math.abs(dx) > Math.abs(dy) * 1.5f) {
                 swipeCandidate = false;
+                MotionEvent cancel = MotionEvent.obtain(event);
+                cancel.setAction(MotionEvent.ACTION_CANCEL);
+                gestures.onTouchEvent(cancel);
+                cancel.recycle();
+                turn(dx < 0 ? 1 : -1);
+                return true;
             }
         }
+        gestures.onTouchEvent(event);
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_DOWN
+                || action == MotionEvent.ACTION_CANCEL) swipeCandidate = false;
         return true;
     }
     void turn(int direction) {

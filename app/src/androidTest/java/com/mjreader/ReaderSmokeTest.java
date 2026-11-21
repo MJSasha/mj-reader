@@ -1263,12 +1263,17 @@ public class ReaderSmokeTest extends Instrumentation {
     private void checkReadingGestures(MainActivity activity) throws Exception {
         checkControlsMotion(activity);
         for (boolean fullscreen : new boolean[]{false, true}) {
+            awaitControlsMotion(activity);
             ReaderPages pages = awaitPages(activity);
             int start = pages.start(), end = pages.end();
             swipeReading(activity, .85f, .5f, .15f, .5f, 250);
-            if (awaitPages(activity).start() != end || (boolean) field(activity, "fullscreen") != fullscreen)
-                throw new AssertionError("Left swipe must turn forward without toggling panels");
-            swipeReading(activity, .15f, .5f, .85f, .5f, 250);
+            ReaderPages turned = awaitPages(activity);
+            boolean fullAfterSwipe = (boolean) field(activity, "fullscreen");
+            if (turned.start() != end || fullAfterSwipe != fullscreen)
+                throw new AssertionError("Left swipe must turn forward without toggling panels, columns=" + turned.columns()
+                        + ", start=" + turned.start() + " expected " + end + ", fullscreen=" + fullAfterSwipe + " expected " + fullscreen);
+            // The up event can carry the drag when intermediate moves are coalesced.
+            swipeReading(activity, .15f, .5f, .85f, .5f, 250, 1);
             if (awaitPages(activity).start() != start || (boolean) field(activity, "fullscreen") != fullscreen)
                 throw new AssertionError("Right swipe must return without toggling panels");
             swipeReading(activity, .62f, .28f, .38f, .72f, 250);
@@ -1285,13 +1290,23 @@ public class ReaderSmokeTest extends Instrumentation {
                 throw new AssertionError("Center must toggle panels without turning a page");
         }
     }
-    private void swipeReading(MainActivity activity, float fromX, float fromY, float toX, float toY, int duration)
-            throws Exception {
+    private void swipeReading(MainActivity activity, float fromX, float fromY, float toX, float toY, int duration) {
+        swipeReading(activity, fromX, fromY, toX, toY, duration, 12);
+    }
+    private void swipeReading(MainActivity activity, float fromX, float fromY, float toX, float toY, int duration, int steps) {
         int[] bounds = readingViewport(activity);
-        shell("input swipe " + (bounds[0] + Math.round(bounds[2] * fromX)) + " "
-                + (bounds[1] + Math.round(bounds[3] * fromY)) + " "
-                + (bounds[0] + Math.round(bounds[2] * toX)) + " "
-                + (bounds[1] + Math.round(bounds[3] * toY)) + " " + duration);
+        long down = android.os.SystemClock.uptimeMillis();
+        for (int step = 0; step <= steps; step++) {
+            long time = down + duration * step / steps;
+            android.os.SystemClock.sleep(Math.max(0, time - android.os.SystemClock.uptimeMillis()));
+            float fraction = (float) step / steps;
+            float x = bounds[0] + bounds[2] * (fromX + (toX - fromX) * fraction);
+            float y = bounds[1] + bounds[3] * (fromY + (toY - fromY) * fraction);
+            int action = step == 0 ? MotionEvent.ACTION_DOWN : step == steps ? MotionEvent.ACTION_UP : MotionEvent.ACTION_MOVE;
+            MotionEvent event = MotionEvent.obtain(down, android.os.SystemClock.uptimeMillis(), action, x, y, 0);
+            sendPointerSync(event);
+            event.recycle();
+        }
     }
     private void checkControlsMotion(MainActivity activity) throws Exception {
         int anchor = (int) field(activity, "anchor");
