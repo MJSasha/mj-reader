@@ -1242,6 +1242,7 @@ public class ReaderSmokeTest extends Instrumentation {
                     reveal.setCurrentFraction(.5f);
                     if (banner.getAlpha() <= 0f || banner.getAlpha() >= 1f
                             || field(banner, "entrance") != null
+                            || banner.getChildAt(0).getAlpha() != 0f || banner.getChildAt(1).getAlpha() != 0f
                             || library.getParent() != banner.getParent() || library.getAlpha() != 1f || library.getScaleX() != 1f
                             || library.getImportantForAccessibility() != View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS)
                         throw new AssertionError("Startup must reveal the positioned library beneath the fading splash");

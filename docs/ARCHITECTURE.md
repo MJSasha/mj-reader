@@ -59,9 +59,10 @@ original text or reset identity just because better metadata became available.
 ## UI and window changes
 
 The UI is composed programmatically. Library rows are virtualized with `ListView`.
-On a cold launcher start with motion enabled, `StartupBanner` animates the book for 280 ms
-after the system splash leaves. The ready library draws underneath, then the banner fades for
-100 ms and restores access. If loading takes longer than 700 ms, the existing library loading
+On a cold launcher start with motion enabled, the system splash hands off to the matching graphite
+backdrop. `StartupBanner` brings the book's pages together for 280 ms. The ready library draws
+underneath, then the banner fades for 100 ms and restores access. The central launch mark clears
+before the library's masthead appears. If loading takes longer than 700 ms, the existing library loading
 indicator takes over. Warm launches, Activity restoration, external opens and reduced motion
 skip the custom banner.
 Columns depend on window width and font scale. Paged reading uses one page on phones

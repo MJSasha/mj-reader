@@ -139,8 +139,12 @@ public class MainActivity extends Activity {
             startup = banner;
             setContentView(banner);
             if (Build.VERSION.SDK_INT >= 31) getSplashScreen().setOnExitAnimationListener(systemSplash -> {
-                systemSplash.remove();
-                banner.startEntrance();
+                if (startup == banner && android.animation.ValueAnimator.areAnimatorsEnabled())
+                    banner.handoffSystemSplash(systemSplash, systemSplash::remove);
+                else {
+                    systemSplash.remove();
+                    banner.startEntrance();
+                }
             });
             banner.postDelayed(() -> {
                 if (startup == banner && !libraryLoaded && !isDestroyed() && !isFinishing()) {

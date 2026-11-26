@@ -82,3 +82,6 @@ Compact chapter header; quick appearance behind the type icon. Footer has contex
 - Android download notification progress uses the family lavender color for the system's light or dark appearance.
 - On a cold launcher start, assemble the book for 280 ms after the system splash and reveal the ready library
   over 100 ms. Warm launches, Android reduced motion and external opens skip the custom banner.
+- The two colored pages slide and turn inward from opposite sides to meet at the spine. The small MJ mark
+  and wordmark stay fixed while the gradient corner shapes shift. The startup identity fades out before the
+  stationary library and its masthead become visible.
