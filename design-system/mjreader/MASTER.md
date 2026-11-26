@@ -94,4 +94,5 @@ Compact chapter header; quick appearance behind the type icon. Footer has contex
   after the centered identity fades. Use the existing loading indicator if the library is still busy.
 - Authoring comparisons use continuous Android recordings of signed 0.9.0 and the light-orbit build.
 - The navigation dock and text-reader footer use the larger of the system bottom inset and 8 dp.
+- The navigation dock has a solid theme-specific surface distinct from book cards.
   This leaves space when the gesture indicator is hidden and uses the system spacing when it is shown.

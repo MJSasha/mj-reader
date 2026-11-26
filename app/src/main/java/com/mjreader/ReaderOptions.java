@@ -39,6 +39,14 @@ final class ReaderOptions {
     }
     boolean light() { return number("theme", 0) >= 2; }
     int surface() { return switch (number("theme", 0)) { case 1 -> 0xFF342E46; case 2 -> 0xFFECE8F1; case 3 -> 0xFFE6D8BC; default -> 0xFF211D2E; }; }
+    int navigationSurface() {
+        return switch (number("theme", 0)) {
+            case 1 -> 0xFF403B50;
+            case 2 -> 0xFFE3DFE7;
+            case 3 -> 0xFFDED0B5;
+            default -> 0xFF302E39;
+        };
+    }
     int surfaceHigh() {
         return switch (number("theme", 0)) {
             case 1 -> 0xFF423A56;

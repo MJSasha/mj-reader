@@ -33,7 +33,7 @@ final class ReaderNavigation {
         dock.setTag(TAG);
         dock.setPadding(dp(context, 4), dp(context, 4), dp(context, 4), dp(context, 4));
         dock.setOrientation(LinearLayout.HORIZONTAL);
-        dock.setBackground(panel(context, theme));
+        dock.setBackground(shape(context, theme.navigationSurface(), 20));
         for (Tab tab : tabs) {
             Button button = item(context, theme, context.getString(tab.title), tab.icon, tab == selected, () -> navigate.accept(tab));
             button.setTag(tab);
