@@ -62,7 +62,7 @@ final class StartupBanner extends LinearLayout {
         setIdentityAlpha(0f);
         emblem.progress = 0f;
         entrance = ValueAnimator.ofFloat(0f, 1f);
-        entrance.setDuration(280);
+        entrance.setDuration(520);
         entrance.addUpdateListener(animation -> {
             emblem.progress = (float) animation.getAnimatedValue();
             setIdentityAlpha(Math.min(1f, emblem.progress / .16f));
@@ -129,7 +129,7 @@ final class StartupBanner extends LinearLayout {
             return;
         }
         reveal = ValueAnimator.ofFloat(0f, 1f);
-        reveal.setDuration(100);
+        reveal.setDuration(420);
         reveal.setInterpolator(new PathInterpolator(.4f, 0f, .2f, 1f));
         reveal.addUpdateListener(animation -> {
             float progress = (float) animation.getAnimatedValue();

@@ -358,11 +358,12 @@ public class MainActivity extends Activity {
             int limit = settingsOpen || (current != null && (focus || !options.flag("pages", false))) ? 700 : 1200;
             int gutter = Math.max(width >= 600 ? 24 : 16, (width - limit) / 2);
             boolean reader = current != null && !settingsOpen;
+            int bottom = reader ? insets.getStableInsetBottom() : insets.getSystemWindowInsetBottom();
+            boolean floatingPanel = (reader && !focus) || view.findViewWithTag(ReaderNavigation.TAG) != null;
             view.setPadding(dp(gutter) + (reader ? insets.getStableInsetLeft() : insets.getSystemWindowInsetLeft()),
                     dp(8) + (reader ? insets.getStableInsetTop() : insets.getSystemWindowInsetTop()),
                     dp(gutter) + (reader ? insets.getStableInsetRight() : insets.getSystemWindowInsetRight()),
-                    dp(view.findViewWithTag(ReaderNavigation.TAG) == null ? 8 : 2)
-                            + (reader ? insets.getStableInsetBottom() : insets.getSystemWindowInsetBottom()));
+                    floatingPanel ? ReaderNavigation.bottomPadding(this, bottom) : dp(8) + bottom);
             ReaderNavigation.updateInsets(view, insets);
             return insets;
         });

@@ -60,11 +60,12 @@ original text or reset identity just because better metadata became available.
 
 The UI is composed programmatically. Library rows are virtualized with `ListView`.
 On a cold launcher start with motion enabled, the system splash hands off to the matching graphite
-backdrop. `StartupBanner` brings the book's pages together for 280 ms. The ready library draws
-underneath, then the banner fades for 100 ms and restores access. The central launch mark clears
+backdrop. `StartupBanner` brings the book's pages together for 520 ms. The ready library draws
+underneath, then the banner fades for 420 ms and restores access. The central launch mark clears
 before the library's masthead appears. If loading takes longer than 700 ms, the existing library loading
 indicator takes over. Warm launches, Activity restoration, external opens and reduced motion
 skip the custom banner.
+The navigation dock and text reader footer use the larger of the system bottom inset and 8 dp.
 Columns depend on window width and font scale. Paged reading uses one page on phones
 and two pages from 640 dp of available reader width (more for large system fonts).
 Each page lays out at most 18k characters, and only visible illustrations decode pixels.

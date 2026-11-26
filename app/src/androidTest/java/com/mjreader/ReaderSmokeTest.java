@@ -1006,6 +1006,10 @@ public class ReaderSmokeTest extends Instrumentation {
                 try {
                     awaitField(screen, "librarySearch"); waitForIdleSync();
                     assertChrome(screen, (ListView) field(screen, "libraryList"));
+                    if (scenario == 0) {
+                        assertFloatingInsets(screen, true);
+                        checkHiddenSystemNavigation(screen);
+                    }
                     assertTouchTargets(screen.getWindow().getDecorView());
                     runOnMainSync(() -> assertIconActions(screen.getWindow().getDecorView().findViewWithTag(ReaderNavigation.TAG)));
                     capture("narrow-library-" + scenario);
@@ -1013,6 +1017,7 @@ public class ReaderSmokeTest extends Instrumentation {
                     runOnMainSync(() -> invoke(screen, "open", new Class[]{Books.Book.class, boolean.class}, book, false));
                     ReaderPages pages = awaitPages(screen); waitForIdleSync();
                     if (pages.columns() != 1) throw new AssertionError("Narrow reader must show one page");
+                    if (scenario == 0) assertFloatingInsets(screen, false);
                     assertTouchTargets(screen.getWindow().getDecorView());
                     assertReadableActions((View) field(screen, "footer"));
                     capture("narrow-reader-" + scenario);
@@ -1042,6 +1047,7 @@ public class ReaderSmokeTest extends Instrumentation {
                         invoke(catalog, "render");
                     }); waitForIdleSync();
                     assertChrome(catalog, (ListView) field(catalog, "resultsList"));
+                    if (scenario == 0) assertFloatingInsets(catalog, true);
                     assertTouchTargets(catalog.getWindow().getDecorView());
                     assertReadableActions(catalog.getWindow().getDecorView());
                     runOnMainSync(() -> {
@@ -1199,6 +1205,7 @@ public class ReaderSmokeTest extends Instrumentation {
             StartupBanner early = new StartupBanner(context);
             boolean[] complete = {false};
             android.animation.ValueAnimator entrance = (android.animation.ValueAnimator) field(early, "entrance");
+            if (entrance.getDuration() != 520) throw new AssertionError("Startup entrance must keep the prior reading tempo");
             if (find(early, "MJ Reader") == null || find(early, context.getString(R.string.loading_books)) != null)
                 throw new AssertionError("Splash must show the MJ Reader wordmark without a loading caption");
             entrance.start();
@@ -1208,6 +1215,7 @@ public class ReaderSmokeTest extends Instrumentation {
             entrance.end();
             if (!(field(early, "reveal") instanceof android.animation.ValueAnimator reveal))
                 throw new AssertionError("Finished entrance must reveal a ready library");
+            if (reveal.getDuration() != 420) throw new AssertionError("The library reveal must keep the prior reading tempo");
             reveal.end();
             if (!complete[0]) throw new AssertionError("Startup never completed");
             for (int theme = 0; theme < 4; theme++) {
@@ -1704,6 +1712,58 @@ public class ReaderSmokeTest extends Instrumentation {
             if (body[1] < top[1] + title.getHeight() || body[1] + list.getHeight() >= bottom[1])
                 throw new AssertionError("Content overlaps masthead or bottom actions");
         });
+    }
+    private void assertFloatingInsets(Activity activity, boolean navigation) {
+        runOnMainSync(() -> {
+            View root = (View) field(activity, "root");
+            View dock = root.findViewWithTag(ReaderNavigation.TAG);
+            float density = activity.getResources().getDisplayMetrics().density;
+            try {
+                for (int dp : new int[]{0, 24, 48}) {
+                    int pixels = Math.round(dp * density);
+                    var bars = android.graphics.Insets.of(0, 0, 0, pixels);
+                    var insets = new WindowInsets.Builder()
+                            .setInsets(WindowInsets.Type.navigationBars(), bars)
+                            .setInsetsIgnoringVisibility(WindowInsets.Type.navigationBars(), bars)
+                            .setVisible(WindowInsets.Type.navigationBars(), dp != 0)
+                            .build();
+                    root.dispatchApplyWindowInsets(insets);
+                    if (root.getPaddingBottom() != Math.round(Math.max(8, dp) * density)
+                            || navigation && dock.getVisibility() != View.VISIBLE)
+                        throw new AssertionError("Floating panel did not use the larger of 8 dp and the bottom inset");
+                }
+                if (navigation) {
+                    root.dispatchApplyWindowInsets(new WindowInsets.Builder()
+                            .setInsets(WindowInsets.Type.ime(), android.graphics.Insets.of(0, 0, 0, Math.round(280 * density)))
+                            .setVisible(WindowInsets.Type.ime(), true)
+                            .build());
+                    if (dock.getVisibility() != View.GONE)
+                        throw new AssertionError("The navigation dock must hide with the keyboard");
+                }
+            } finally { root.requestApplyInsets(); }
+        });
+        waitForIdleSync();
+    }
+    private void checkHiddenSystemNavigation(MainActivity activity) throws Exception {
+        int bars = WindowInsets.Type.navigationBars();
+        runOnMainSync(() -> activity.getWindow().getInsetsController().hide(bars));
+        try {
+            boolean[] ready = {false};
+            for (int i = 0; i < 50 && !ready[0]; i++) {
+                runOnMainSync(() -> {
+                    View root = (View) field(activity, "root");
+                    WindowInsets insets = root.getRootWindowInsets();
+                    if (insets != null && !insets.isVisible(bars) && insets.getSystemWindowInsetBottom() == 0) {
+                        int gap = Math.round(8 * activity.getResources().getDisplayMetrics().density);
+                        ready[0] = root.getPaddingBottom() == gap;
+                    }
+                });
+                if (!ready[0]) Thread.sleep(100);
+            }
+            if (!ready[0]) throw new AssertionError("Hidden system navigation did not leave an 8 dp library gap");
+            capture("library-inset-zero");
+        } finally { runOnMainSync(() -> activity.getWindow().getInsetsController().show(bars)); }
+        waitForIdleSync();
     }
     private void assertTouchTargets(View view) {
         if (view instanceof Button && view.isShown() && (view.getWidth() + 1 < 48 * view.getResources().getDisplayMetrics().density

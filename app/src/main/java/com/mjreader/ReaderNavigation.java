@@ -87,6 +87,10 @@ final class ReaderNavigation {
         navigation.setVisibility(keyboard ? View.GONE : View.VISIBLE);
     }
 
+    static int bottomPadding(Context context, int systemInset) {
+        return Math.max(dp(context, 8), systemInset);
+    }
+
     private static GradientDrawable shape(Context context, int color, int radius) {
         GradientDrawable shape = new GradientDrawable();
         shape.setColor(color);
