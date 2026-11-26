@@ -322,7 +322,7 @@ public class BookDownloadService extends Service {
         if (Build.VERSION.SDK_INT >= 36) {
             boolean night = (context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
             builder.setStyle(new Notification.ProgressStyle()
-                    .setProgressSegments(List.of(new Notification.ProgressStyle.Segment(100).setColor(night ? 0xFFC4FF60 : 0xFF739500)))
+                    .setProgressSegments(List.of(new Notification.ProgressStyle.Segment(100).setColor(ReaderOptions.brand(!night))))
                     .setProgress(percent).setProgressIndeterminate(!knownSize)
                     .setProgressTrackerIcon(Icon.createWithResource(context, R.drawable.ic_notification)));
         } else builder.setProgress(100, percent, !knownSize);

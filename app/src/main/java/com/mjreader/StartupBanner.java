@@ -11,6 +11,7 @@ import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -27,6 +28,9 @@ final class StartupBanner extends LinearLayout {
     private LinearGradient lavenderFill, pinkFill;
     private ValueAnimator entrance;
     private ValueAnimator reveal;
+    private Runnable libraryReady;
+    private boolean firstFrame = true;
+    private final Runnable startEntrance = this::startEntrance;
 
     StartupBanner(Context context) {
         super(context);
@@ -56,11 +60,19 @@ final class StartupBanner extends LinearLayout {
         if (!ValueAnimator.areAnimatorsEnabled()) return;
         emblem.progress = 0f;
         entrance = ValueAnimator.ofFloat(0f, 1f);
-        entrance.setDuration(340);
+        entrance.setDuration(280);
         entrance.addUpdateListener(animation -> {
             emblem.progress = (float) animation.getAnimatedValue();
             emblem.invalidate();
             invalidate();
+        });
+        entrance.addListener(new AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(Animator animation) {
+                entrance = null;
+                Runnable complete = libraryReady;
+                libraryReady = null;
+                if (complete != null) reveal(complete);
+            }
         });
     }
 
@@ -76,6 +88,11 @@ final class StartupBanner extends LinearLayout {
 
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+        if (firstFrame) {
+            firstFrame = false;
+            // A launch without a transferred system splash gets no exit callback.
+            postDelayed(startEntrance, Build.VERSION.SDK_INT >= 31 ? 250 : 0);
+        }
         float settled = Math.max(0f, 2f * emblem.progress - 1f);
         paint.setShader(lavenderFill);
         paint.setAlpha(Math.round(255 * (1f - settled)));
@@ -98,9 +115,12 @@ final class StartupBanner extends LinearLayout {
             complete.run();
             return;
         }
-        if (entrance != null) entrance.cancel();
+        if (entrance != null) {
+            libraryReady = complete;
+            return;
+        }
         reveal = ValueAnimator.ofFloat(0f, 1f);
-        reveal.setDuration(160);
+        reveal.setDuration(100);
         reveal.setInterpolator(new PathInterpolator(.4f, 0f, .2f, 1f));
         reveal.addUpdateListener(animation -> {
             float progress = (float) animation.getAnimatedValue();
@@ -115,13 +135,19 @@ final class StartupBanner extends LinearLayout {
         reveal.start();
     }
 
-    @Override protected void onAttachedToWindow() {
-        super.onAttachedToWindow();
-        if (entrance != null) entrance.start();
+    void startEntrance() {
+        removeCallbacks(startEntrance);
+        if (entrance != null && !entrance.isStarted() && isAttachedToWindow()) entrance.start();
     }
 
     @Override protected void onDetachedFromWindow() {
-        if (entrance != null) entrance.cancel();
+        removeCallbacks(startEntrance);
+        libraryReady = null;
+        if (entrance != null) {
+            entrance.removeAllListeners();
+            entrance.cancel();
+            entrance = null;
+        }
         if (reveal != null) {
             reveal.removeAllListeners();
             reveal.cancel();
