@@ -7,6 +7,7 @@ import android.graphics.Typeface;
 import org.json.JSONObject;
 
 final class ReaderOptions {
+    static final int DEFAULT_ACCENT = 2;
     final JSONObject values;
     ReaderOptions(String json) {
         JSONObject parsed;
@@ -34,27 +35,28 @@ final class ReaderOptions {
         return new ReaderOptions(prefs.getString(book != null && prefs.contains("options." + book) ? "options." + book : "options", "{}"));
     }
     int background() {
-        return switch (number("theme", 0)) { case 1 -> 0xFF242033; case 2 -> 0xFFFAFAF7; case 3 -> 0xFFF3E7CF; default -> 0xFF0C0E15; };
+        return switch (number("theme", 0)) { case 1 -> 0xFF242033; case 2 -> 0xFFFAFAF7; case 3 -> 0xFFF3E7CF; default -> 0xFF12111A; };
     }
     boolean light() { return number("theme", 0) >= 2; }
-    int surface() { return switch (number("theme", 0)) { case 1 -> 0xFF342E46; case 2 -> 0xFFEAEDE6; case 3 -> 0xFFE6D8BC; default -> 0xFF191E29; }; }
+    int surface() { return switch (number("theme", 0)) { case 1 -> 0xFF342E46; case 2 -> 0xFFECE8F1; case 3 -> 0xFFE6D8BC; default -> 0xFF211D2E; }; }
     int surfaceHigh() {
         return switch (number("theme", 0)) {
             case 1 -> 0xFF423A56;
-            case 2 -> 0xFFE1E5DC;
+            case 2 -> 0xFFE5DFEC;
             case 3 -> 0xFFD9CAAC;
-            default -> 0xFF242B39;
+            default -> 0xFF30283F;
         };
     }
-    int ink() { return light() ? 0xFF20251F : number("theme", 0) == 1 ? 0xFFF3EEF7 : 0xFFF0F2EC; }
-    int muted() { return light() ? 0xFF4D584E : number("theme", 0) == 1 ? 0xFFC3B8D2 : 0xFFABB5C5; }
+    int ink() { return switch (number("theme", 0)) { case 1 -> 0xFFF3EEF7; case 2 -> 0xFF231E28; case 3 -> 0xFF20251F; default -> 0xFFF5F1F8; }; }
+    int muted() { return switch (number("theme", 0)) { case 1 -> 0xFFC3B8D2; case 2 -> 0xFF574C60; case 3 -> 0xFF4D584E; default -> 0xFFC7BCD9; }; }
+    int brand() { return light() ? 0xFF64348A : 0xFFCDA5FF; }
     int accent() {
-        int[] dark = {0xFFC7FF68, 0xFF8BD9FF, 0xFFD6B5FF, 0xFFFFCF82};
-        int[] light = {0xFF345A05, 0xFF07577A, 0xFF64348A, 0xFF785000};
-        return (light() ? light : dark)[Math.max(0, Math.min(3, number("accent", 0)))];
+        int[] dark = {0xFFC7FF68, 0xFF8BD9FF, brand(), 0xFFFFCF82};
+        int[] light = {0xFF345A05, 0xFF07577A, brand(), 0xFF785000};
+        return (light() ? light : dark)[Math.max(0, Math.min(3, number("accent", DEFAULT_ACCENT)))];
     }
     int selection() {
-        if (number("accent", 0) == 0) {
+        if (number("accent", DEFAULT_ACCENT) == 0) {
             if (number("theme", 0) == 0) return 0xFF303D28;
             if (number("theme", 0) == 2) return 0xFFDCE9CB;
         }
@@ -64,9 +66,16 @@ final class ReaderOptions {
                 (7 * Color.green(surface) + Color.green(accent)) / 8,
                 (7 * Color.blue(surface) + Color.blue(accent)) / 8);
     }
-    int onSelection() { return number("theme", 0) == 2 && number("accent", 0) == 0 ? accent() : light() ? ink() : accent(); }
+    int onSelection() { return number("theme", 0) == 2 && number("accent", DEFAULT_ACCENT) == 0 ? accent() : light() ? ink() : accent(); }
     int error() { return light() ? 0xFFA32323 : 0xFFFFB4AB; }
-    int outline() { return light() ? 0xFF687267 : 0xFF68778D; }
+    int outline() { return light() ? 0xFF786884 : 0xFF877399; }
+    boolean vividSelection() { return number("theme", 0) == 0 && number("accent", DEFAULT_ACCENT) == DEFAULT_ACCENT; }
+    android.graphics.drawable.GradientDrawable vividSelection(float density, int radius) {
+        var background = new android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR, new int[]{0xFF59347E, 0xFF702C63});
+        background.setCornerRadius(radius * density);
+        return background;
+    }
     android.graphics.drawable.GradientDrawable feature(float density, int radius) {
         var background = new android.graphics.drawable.GradientDrawable(
                 android.graphics.drawable.GradientDrawable.Orientation.TL_BR, new int[]{surfaceHigh(), surface()});
@@ -113,7 +122,7 @@ final class ReaderOptions {
             @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
         };
     }
-    int onAccent() { return light() ? 0xFFFFFFFF : 0xFF0C0E15; }
+    int onAccent() { return light() ? 0xFFFFFFFF : 0xFF12111A; }
     // Small window changes do not always recreate an Activity. Ignore IME-only resizes.
     static void observeWindow(android.view.View root, Runnable resize) {
         android.content.res.Configuration initial = root.getResources().getConfiguration();

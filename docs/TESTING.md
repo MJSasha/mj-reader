@@ -92,7 +92,9 @@ adb -s emulator-5554 shell am instrument -w -e showcase true com.mjreader.test/c
 adb -s emulator-5554 exec-out run-as com.mjreader cat files/qa-showcase-library-dark.png > docs/images/library-dark.png
 ```
 
-The other generated names are `library-light`, `reading`, `rsvp`, `settings` and `fold`.
+The other phone screenshot names are `library-light`, `reading` (Sepia), `reading-dark`,
+`rsvp` and `settings`. For `fold`, set `adb -s emulator-5554 shell wm size 800x900` before
+launching the same showcase run, then restore the emulator size.
 Review images before committing. The full `dist/` history and personal-book captures
 are intentionally excluded from Git.
 

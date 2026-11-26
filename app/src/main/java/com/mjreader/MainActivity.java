@@ -131,8 +131,15 @@ public class MainActivity extends Activity {
         if (state == null) receiveFile(launch);
         if (state == null && launch != null && Intent.ACTION_MAIN.equals(launch.getAction())
                 && launch.hasCategory(Intent.CATEGORY_LAUNCHER)) {
-            startup = new StartupBanner(this);
-            setContentView(startup);
+            StartupBanner banner = new StartupBanner(this);
+            startup = banner;
+            setContentView(banner);
+            banner.postDelayed(() -> {
+                if (startup == banner && !libraryLoaded && !isDestroyed() && !isFinishing()) {
+                    dismissStartup();
+                    showLibraryLoading();
+                }
+            }, 700);
         } else showLibraryLoading();
         worker.execute(() -> {
             try {
@@ -341,7 +348,8 @@ public class MainActivity extends Activity {
             view.setPadding(dp(gutter) + (reader ? insets.getStableInsetLeft() : insets.getSystemWindowInsetLeft()),
                     dp(8) + (reader ? insets.getStableInsetTop() : insets.getSystemWindowInsetTop()),
                     dp(gutter) + (reader ? insets.getStableInsetRight() : insets.getSystemWindowInsetRight()),
-                    dp(8) + (reader ? insets.getStableInsetBottom() : insets.getSystemWindowInsetBottom()));
+                    dp(view.findViewWithTag(ReaderNavigation.TAG) == null ? 8 : 2)
+                            + (reader ? insets.getStableInsetBottom() : insets.getSystemWindowInsetBottom()));
             ReaderNavigation.updateInsets(view, insets);
             return insets;
         });
@@ -429,7 +437,10 @@ public class MainActivity extends Activity {
         body = null;
         shell();
         LinearLayout mast = row();
-        TextView brand = label(getString(R.string.library), 28, options.ink());
+        TextView brand = label("", 28, options.ink());
+        SpannableString wordmark = new SpannableString(getString(R.string.startup_title));
+        wordmark.setSpan(new android.text.style.ForegroundColorSpan(options.brand()), 0, 2, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        brand.setText(wordmark);
         brand.setTypeface(Typeface.DEFAULT_BOLD);
         if (Build.VERSION.SDK_INT >= 28) brand.setAccessibilityHeading(true);
         mast.addView(brand, new LinearLayout.LayoutParams(0, -2, 1));
@@ -437,16 +448,15 @@ public class MainActivity extends Activity {
         add.setEnabled(!importing);
         mast.addView(add, new LinearLayout.LayoutParams(dp(48), dp(48)));
         root.addView(mast);
-        View mastDivider = new View(this);
-        mastDivider.setBackgroundColor(options.surface());
-        root.addView(mastDivider, new LinearLayout.LayoutParams(-1, dp(1)));
         boolean wide = getResources().getConfiguration().screenWidthDp >= 740
                 && getResources().getConfiguration().fontScale < 1.6f;
         librarySearch = field(query);
         librarySearch.setHint(tr("Название или автор", "Title or author"));
         librarySearch.setContentDescription(tr("Поиск по библиотеке", "Search library"));
         librarySearch.setSingleLine(true);
-        librarySearch.setBackground(feedback(shape(options.surfaceHigh(), 16)));
+        GradientDrawable searchSurface = shape(options.surfaceHigh(), 16);
+        searchSurface.setStroke(dp(1), options.selection());
+        librarySearch.setBackground(feedback(searchSurface));
         librarySearch.setOnClickListener(v -> {
             librarySearch.requestFocus();
             ((android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE))
@@ -514,9 +524,9 @@ public class MainActivity extends Activity {
         libraryList.setItemsCanFocus(true);
         libraryList.setClipToPadding(false);
         LinearLayout libraryHeader = column();
-        while (root.getChildCount() > 2) {
-            View child = root.getChildAt(2);
-            root.removeViewAt(2);
+        while (root.getChildCount() > 1) {
+            View child = root.getChildAt(1);
+            root.removeViewAt(1);
             libraryHeader.addView(child);
         }
         libraryList.addHeaderView(libraryHeader, null, false);
@@ -633,13 +643,8 @@ public class MainActivity extends Activity {
         TextView caption = label(tr("Продолжить", "Continue reading") + " · " + percent + "%", 14, options.muted());
         detail.addView(caption);
         gap(detail, 8);
-        ProgressBar progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        ProgressBar progress = libraryProgress(percent);
         progress.setTag("continue-progress");
-        progress.setMax(100);
-        progress.setProgress(percent);
-        progress.setProgressTintList(android.content.res.ColorStateList.valueOf(options.accent()));
-        progress.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(options.muted()));
-        progress.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         detail.addView(progress, new LinearLayout.LayoutParams(-1, dp(4)));
         card.addView(detail, weight());
         ImageView arrow = new ImageView(this); arrow.setImageDrawable(new ReaderIcon(this, "forward", options.accent()));
@@ -835,12 +840,7 @@ public class MainActivity extends Activity {
         for (TextView label : new TextView[]{titleView, authorView, progressLabel})
             label.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         if (state.equals("reading")) {
-            ProgressBar progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-            progress.setProgress(percent);
-            progress.setProgressTintList(ColorStateList.valueOf(options.accent()));
-            progress.setProgressBackgroundTintList(ColorStateList.valueOf(options.background()));
-            progress.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            card.addView(progress, new LinearLayout.LayoutParams(-1, dp(4)));
+            card.addView(libraryProgress(percent), new LinearLayout.LayoutParams(-1, dp(4)));
         }
         if (deleted) {
             card.addView(button(tr("Вернуть", "Restore"), false, () -> {
@@ -1086,7 +1086,8 @@ public class MainActivity extends Activity {
         title.setMaxLines(1);
         title.setEllipsize(TextUtils.TruncateAt.END);
         if (!compact) identity.addView(title);
-        chapterLabel = label("", 14, options.ink());
+        chapterLabel = label("", compact ? 14 : 16, options.ink());
+        chapterLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         chapterLabel.setMaxLines(1); chapterLabel.setEllipsize(TextUtils.TruncateAt.END);
         identity.addView(chapterLabel);
         identity.setMinimumHeight(dp(48)); identity.setGravity(Gravity.CENTER_VERTICAL);
@@ -1226,7 +1227,7 @@ public class MainActivity extends Activity {
         boolean compact = getResources().getConfiguration().screenHeightDp < 400;
         footer = column();
         footer.setPadding(dp(8), compact ? 0 : dp(8), dp(8), compact ? 0 : dp(8));
-        footer.setBackground(shape(options.surface(), 20));
+        footer.setBackground(compact ? shape(options.surface(), 20) : ReaderNavigation.panel(this, options));
         LinearLayout navigation = row();
         previousPageButton = nextPageButton = null;
         if (options.flag("pages", false)) {
@@ -1243,7 +1244,7 @@ public class MainActivity extends Activity {
         counter.setContentDescription(tr("Прогресс и переход по книге", "Reading progress and navigation"));
         counter.setOnClickListener(v -> readingNavigation());
         counter.setFocusable(true);
-        counter.setBackground(feedback(shape(options.surface(), 14)));
+        counter.setBackground(feedback(shape(compact ? options.surface() : Color.TRANSPARENT, 14)));
         navigation.addView(counter, new LinearLayout.LayoutParams(0, -2, 1));
         if (options.flag("pages", false)) {
             space(navigation);
@@ -1253,29 +1254,23 @@ public class MainActivity extends Activity {
             navigation.addView(next, new LinearLayout.LayoutParams(dp(48), compact ? dp(48) : -2));
         }
         footer.addView(navigation);
-        if (getResources().getConfiguration().screenHeightDp >= 400) {
+        if (!compact) {
             LinearLayout tools = row();
-            LinearLayout extraTools = ReaderNavigation.twoRows(this) ? row() : tools;
-            Button chapters = ReaderNavigation.item(this, options, tr("Главы", "Chapters"), "list", false, this::contents);
-            chapters.setContentDescription(tr("Оглавление", "Contents"));
+            tools.setBackground(ReaderNavigation.panel(this, options));
+            Button chapters = ReaderNavigation.item(this, options, tr("Оглавление", "Contents"), "list", false, this::contents);
             tools.addView(chapters, weight());
             space(tools);
-            Button bookmark = ReaderNavigation.item(this, options, tr("Закладка", "Bookmark"), "bookmark", false, this::addBookmark);
-            bookmark.setContentDescription(tr("Добавить закладку", "Add bookmark"));
+            Button bookmark = ReaderNavigation.item(this, options, tr("Добавить закладку", "Add bookmark"), "bookmark", false, this::addBookmark);
             tools.addView(bookmark, weight());
-            if (extraTools == tools) space(tools);
-            Button theme = ReaderNavigation.item(this, options, tr("Тема", "Theme"), "sun", false, () -> {
+            space(tools);
+            Button theme = ReaderNavigation.item(this, options, tr("Сменить тему: день / ночь", "Change theme: day / night"), "sun", false, () -> {
                 options.put("theme", options.light() ? 0 : 2); changedOptions();
             });
-            theme.setContentDescription(tr("Сменить тему: день / ночь", "Change theme: day / night"));
-            extraTools.addView(theme, weight());
-            Button rsvp = ReaderNavigation.item(this, options, "RSVP", "speed", false, () -> { focus = true; reader(); });
-            rsvp.setContentDescription(getString(R.string.rsvp_action));
-            space(extraTools);
-            extraTools.addView(rsvp, weight());
-            gap(footer, 8);
+            tools.addView(theme, weight());
+            space(tools);
+            Button rsvp = ReaderNavigation.item(this, options, getString(R.string.rsvp_action), "speed", false, () -> { focus = true; reader(); });
+            tools.addView(rsvp, weight());
             footer.addView(tools);
-            if (extraTools != tools) { gap(footer, 8); footer.addView(extraTools); }
         }
         LinearLayout.LayoutParams dock = new LinearLayout.LayoutParams(-1, -2);
         dock.topMargin = dp(8);
@@ -1287,7 +1282,10 @@ public class MainActivity extends Activity {
         button.setContentDescription(description);
         button.setTooltipText(description);
         boolean quiet = icon.equals("settings") || icon.equals("back") || icon.equals("download");
-        LayerDrawable background = new LayerDrawable(new Drawable[]{feedback(shape(quiet ? options.background() : options.surface(), 16)), new ReaderIcon(this, icon, options.ink())});
+        boolean vivid = icon.equals("plus") && options.vividSelection();
+        GradientDrawable fill = vivid ? options.vividSelection(getResources().getDisplayMetrics().density, 16)
+                : shape(quiet ? options.background() : options.surface(), 16);
+        LayerDrawable background = new LayerDrawable(new Drawable[]{feedback(fill), new ReaderIcon(this, icon, options.ink())});
         background.setLayerSize(1, dp(24), dp(24));
         background.setLayerGravity(1, Gravity.CENTER);
         button.setBackground(background);
@@ -2071,7 +2069,7 @@ public class MainActivity extends Activity {
             content = settingsGroup(page, "palette", tr("Цвет и атмосфера", "Color & atmosphere"));
             themeChoices(content);
             choose(content, "palette", tr("Акцент", "Accent"), new String[]{tr("Лайм", "Lime"), tr("Лёд", "Ice"), tr("Лаванда", "Lavender"), tr("Янтарь", "Amber")},
-                    options.number("accent", 0), value -> { options.put("accent", value); changedOptions(); });
+                    options.number("accent", ReaderOptions.DEFAULT_ACCENT), value -> { options.put("accent", value); changedOptions(); });
             content = settingsGroup(page, "page", tr("Страница", "Page layout"));
             range(content, tr("Поля", "Margins"), 0, 40, options.number("margin", 8),
                     value -> { options.put("margin", value); changedOptions(); });
@@ -2301,8 +2299,28 @@ public class MainActivity extends Activity {
     private Button selectionButton(String title, boolean selected, Runnable action) {
         int foreground = selected ? options.onSelection() : options.muted();
         Button button = button(title, foreground, selected ? options.selection() : options.surface(), 12, action);
+        if (selected && options.vividSelection()) {
+            button.setTextColor(options.ink());
+            button.setBackground(feedback(options.vividSelection(getResources().getDisplayMetrics().density, 12)));
+        }
         button.setSelected(selected);
         return button;
+    }
+    private ProgressBar libraryProgress(int percent) {
+        ProgressBar progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        GradientDrawable fill = shape(options.accent(), 2);
+        if (options.vividSelection()) {
+            fill.setOrientation(GradientDrawable.Orientation.LEFT_RIGHT);
+            fill.setColors(new int[]{options.brand(), 0xFFFF84DC});
+        }
+        LayerDrawable track = new LayerDrawable(new Drawable[]{shape(options.surfaceHigh(), 2),
+                new ScaleDrawable(fill, Gravity.START, 1f, -1f)});
+        track.setId(0, android.R.id.background);
+        track.setId(1, android.R.id.progress);
+        progress.setProgressDrawable(track);
+        progress.setProgress(percent);
+        progress.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        return progress;
     }
     private EditText field(String value) {
         EditText input = new EditText(this);
