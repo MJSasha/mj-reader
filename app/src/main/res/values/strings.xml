@@ -4,6 +4,7 @@
     <string name="downloads">Downloads</string>
     <string name="settings">Settings</string>
     <string name="startup_title" translatable="false">MJReader</string>
+    <string name="launch_wordmark" translatable="false">MJ Reader</string>
     <string name="loading_books">Loading books…</string>
     <string name="add_book">Add book</string>
     <string name="demo_author">MJReader original</string>

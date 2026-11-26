@@ -5,6 +5,7 @@ import android.content.*;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.MediaStore;
+import android.text.TextUtils;
 import android.view.*;
 import android.widget.*;
 import java.io.*;
@@ -956,6 +957,10 @@ public class ReaderSmokeTest extends Instrumentation {
             activity = startStableMain(context);
             awaitField(activity, "librarySearch"); MainActivity screen = activity;
             runOnMainSync(() -> { setField(screen, "books", demo); setField(screen, "sort", 2); invoke(screen, "library"); });
+            if (screen.getResources().getConfiguration().screenWidthDp >= 740) {
+                waitForIdleSync(); capture("showcase-fold");
+                return;
+            }
             waitForIdleSync(); capture("showcase-library-dark");
             runOnMainSync(() -> { ((ReaderOptions) field(screen, "options")).put("theme", 2); invoke(screen, "changedOptions"); invoke(screen, "library"); });
             waitForIdleSync(); capture("showcase-library-light");
@@ -964,21 +969,24 @@ public class ReaderSmokeTest extends Instrumentation {
             TextView duplicate = ((View) field(screen, "header")).findViewWithTag("reader-book-title");
             if (duplicate != null && duplicate.getVisibility() != View.GONE)
                 throw new AssertionError("Book and chapter title are repeated");
+            runOnMainSync(() -> {
+                ((ReaderOptions) field(screen, "options")).put("theme", 0);
+                ((ReaderOptions) field(screen, "options")).put("pages", false);
+                invoke(screen, "changedOptions");
+                invoke(screen, "jump", new Class[]{int.class}, 0);
+            });
+            awaitField(screen, "body"); waitForIdleSync(); capture("showcase-reading-dark");
             runOnMainSync(() -> { ReaderOptions options = (ReaderOptions) field(screen, "options"); options.put("theme", 3); invoke(screen, "changedOptions"); invoke(screen, "jump", new Class[]{int.class}, 0); });
             waitForIdleSync(); capture("showcase-reading");
             runOnMainSync(() -> { ((ReaderOptions) field(screen, "options")).put("theme", 0); invoke(screen, "changedOptions"); setField(screen, "focus", true); invoke(screen, "reader"); });
             waitForIdleSync(); capture("showcase-rsvp");
             runOnMainSync(() -> invoke(screen, "settings", new Class[]{boolean.class}, false));
             waitForIdleSync(); capture("showcase-settings");
-            runOnMainSync(() -> { setField(screen, "settingsOpen", false); invoke(screen, "library"); }); waitForIdleSync();
-            activity = resize(screen, "800x900"); awaitField(activity, "librarySearch"); MainActivity wide = activity;
-            runOnMainSync(() -> { setField(wide, "books", demo); setField(wide, "sort", 2); invoke(wide, "library"); });
-            waitForIdleSync(); capture("showcase-fold");
         } finally {
             if (activity != null) { MainActivity end = activity; runOnMainSync(end::finish); }
             var editor = prefs.edit().putString("options", oldOptions).putBoolean("grid", oldGrid);
             for (String key : prefs.getAll().keySet()) if (key.contains("showcase-")) editor.remove(key);
-            editor.apply(); shell("wm size 430x932");
+            editor.apply();
         }
     }
     private void narrowScreenCheck() throws Exception {
@@ -998,8 +1006,7 @@ public class ReaderSmokeTest extends Instrumentation {
                     awaitField(screen, "librarySearch"); waitForIdleSync();
                     assertChrome(screen, (ListView) field(screen, "libraryList"));
                     assertTouchTargets(screen.getWindow().getDecorView());
-                    ViewGroup root = (ViewGroup) field(screen, "root");
-                    assertReadableActions(root.getChildAt(root.getChildCount() - 1));
+                    runOnMainSync(() -> assertIconActions(screen.getWindow().getDecorView().findViewWithTag(ReaderNavigation.TAG)));
                     capture("narrow-library-" + scenario);
                     Books.Book book = new Books(context).list().stream().filter(b -> b.id().equals("demo-en")).findFirst().orElseThrow();
                     runOnMainSync(() -> invoke(screen, "open", new Class[]{Books.Book.class, boolean.class}, book, false));
@@ -1180,6 +1187,19 @@ public class ReaderSmokeTest extends Instrumentation {
         });
     }
     private void startupCheck(Context context) throws Exception {
+        runOnMainSync(() -> {
+            StartupBanner early = new StartupBanner(context);
+            boolean[] complete = {false};
+            android.animation.ValueAnimator entrance = (android.animation.ValueAnimator) field(early, "entrance");
+            if (find(early, "MJ Reader") == null || find(early, context.getString(R.string.loading_books)) != null)
+                throw new AssertionError("Splash must show the MJ Reader wordmark without a loading caption");
+            entrance.start();
+            early.reveal(() -> complete[0] = true);
+            if (!(field(early, "reveal") instanceof android.animation.ValueAnimator reveal) || entrance.isRunning())
+                throw new AssertionError("A ready library must interrupt the entrance immediately");
+            reveal.end();
+            if (!complete[0]) throw new AssertionError("Interrupted startup never completed");
+        });
         Intent launch = new Intent(Intent.ACTION_MAIN).setClass(context, MainActivity.class)
                 .addCategory(Intent.CATEGORY_LAUNCHER).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         watchStartup = true;
@@ -1187,6 +1207,22 @@ public class ReaderSmokeTest extends Instrumentation {
         try { activity = (MainActivity) startActivitySync(launch); }
         finally { watchStartup = false; }
         try {
+            boolean[] paused = {false};
+            for (int attempt = 0; attempt < 200 && !paused[0]; attempt++) {
+                runOnMainSync(() -> paused[0] = startupReveal != null);
+                if (!paused[0]) Thread.sleep(10);
+            }
+            if (!paused[0]) throw new AssertionError("Missing animated startup reveal on a drawn frame");
+            String[] stages = {"wordmark", "assembly", "book"};
+            for (int stage = 0; stage < stages.length; stage++) {
+                float fraction = stage / 2f;
+                runOnMainSync(() -> {
+                    StartupBanner banner = (StartupBanner) field(activity, "startup");
+                    ((android.animation.ValueAnimator) field(banner, "entrance")).setCurrentFraction(fraction);
+                    startupReveal.setCurrentFraction(0f);
+                });
+                capture("startup-" + stages[stage]);
+            }
             boolean[] checked = {false};
             for (int attempt = 0; attempt < 200 && !checked[0]; attempt++) {
                 runOnMainSync(() -> {
@@ -1196,10 +1232,10 @@ public class ReaderSmokeTest extends Instrumentation {
                     View library = (View) field(activity, "root");
                     if (!library.isLaidOut()) return;
                     reveal.setCurrentFraction(.5f);
-                    if (banner.getAlpha() <= 0f || banner.getAlpha() >= 1f || banner.getChildAt(0).getScaleX() <= 1f
+                    if (banner.getAlpha() <= 0f || banner.getAlpha() >= 1f
                             || library.getParent() != banner.getParent() || library.getAlpha() != 1f || library.getScaleX() != 1f
                             || library.getImportantForAccessibility() != View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS)
-                        throw new AssertionError("Startup must reveal the positioned library beneath the outgoing emblem");
+                        throw new AssertionError("Startup must reveal the positioned library beneath the fading splash");
                     reveal.end();
                     if (banner.getParent() != null || field(activity, "startup") != null || field(activity, "root") != library
                             || library.getImportantForAccessibility() != View.IMPORTANT_FOR_ACCESSIBILITY_AUTO)
@@ -1266,15 +1302,8 @@ public class ReaderSmokeTest extends Instrumentation {
                 runOnMainSync(() -> {
                     ViewGroup dock = (ViewGroup) field(opened, "footer");
                     ViewGroup actions = (ViewGroup) dock.getChildAt(dock.getChildCount() - 1);
-                    for (int i = 0; i < actions.getChildCount(); i++) if (actions.getChildAt(i) instanceof Button button) {
-                        if (!(button.getCompoundDrawablesRelative()[1] instanceof android.graphics.drawable.LayerDrawable indicator))
-                            throw new AssertionError("Reading action must show an icon above its label");
-                        android.graphics.Rect icon = indicator.getDrawable(1).getBounds(), bounds = indicator.getBounds();
-                        if (Math.abs(icon.centerX() - bounds.centerX()) > 1 || Math.abs(icon.centerY() - bounds.centerY()) > 1
-                                || (button.getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK) != Gravity.CENTER_HORIZONTAL)
-                            throw new AssertionError("Action icon is outside the center of its indicator");
-                        button.setHovered(true);
-                    }
+                    assertIconActions(actions);
+                    for (int i = 0; i < actions.getChildCount(); i++) actions.getChildAt(i).setHovered(true);
                 });
                 capture("pages-hover-" + theme);
                 checkPageAnimation(opened, "phone-" + theme);
@@ -1390,6 +1419,22 @@ public class ReaderSmokeTest extends Instrumentation {
             prefs.edit().putString("options", oldOptions).commit();
             shell("wm size 430x932"); shell("settings put system font_scale 1.0"); shell("settings put global animator_duration_scale 1");
         }
+    }
+
+    private void assertIconActions(ViewGroup actions) {
+        int target = Math.round(48 * actions.getResources().getDisplayMetrics().density);
+        int buttons = 0;
+        for (int i = 0; i < actions.getChildCount(); i++) if (actions.getChildAt(i) instanceof Button button) {
+            buttons++;
+            if (button.getText().length() != 0 || TextUtils.isEmpty(button.getContentDescription())
+                    || button.getWidth() < target || button.getHeight() < target
+                    || !(button.getBackground() instanceof android.graphics.drawable.LayerDrawable indicator))
+                throw new AssertionError("Expected an icon-only control with an accessible name and 48 dp target");
+            android.graphics.Rect icon = indicator.getDrawable(1).getBounds(), bounds = indicator.getBounds();
+            if (Math.abs(icon.centerX() - bounds.centerX()) > 1 || Math.abs(icon.centerY() - bounds.centerY()) > 1)
+                throw new AssertionError("Action icon is outside the center of its target");
+        }
+        if (buttons != 4) throw new AssertionError("Expected four icon actions");
     }
     private void awaitSpreadOnDisplay(MainActivity activity) {
         int background = ((ReaderOptions) field(activity, "options")).background();
@@ -1612,7 +1657,7 @@ public class ReaderSmokeTest extends Instrumentation {
     }
     private void assertChrome(Activity activity, ListView list) {
         runOnMainSync(() -> {
-            String heading = activity instanceof MainActivity ? activity.getString(R.string.library)
+            String heading = activity instanceof MainActivity ? activity.getString(R.string.startup_title)
                     : activity.getString(R.string.search);
             TextView title = find(activity.getWindow().getDecorView(), heading);
             android.graphics.Rect visible = new android.graphics.Rect();

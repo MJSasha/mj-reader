@@ -4,12 +4,12 @@ Selected with ui-ux-pro-max from the verified Dark Mode (OLED) and E-Ink / Paper
 
 Use Android Views with branded control drawing and dialogs, preserving native accessibility and native file selection. The library carries the visual identity. Reading prioritizes text and hides controls on demand.
 
-- Launcher icons follow the shared [MJ family rules](../mj-family/ICONS.md): fixed MJ monogram, dark background, lime foreground and a small app-specific symbol. The reader uses an open book; adaptive masks and monochrome theming are supplied by Android.
+- Launcher icons follow the shared [MJ family rules](../mj-family/ICONS.md): graphite background, a gradient open book and a small MJ mark; adaptive masks and monochrome theming are supplied by Android.
 - Semantic colors live in ReaderOptions. Dark, Dusk, paper and sepia have independent contrast-safe text and accent pairs.
 - Menu actions, settings sections and playback controls share 24-unit outline icons from ReaderIcon. Icons inherit semantic foreground colors; adjacent text supplies the accessible name.
 - Android controls have a minimum 48 dp target. Adjacent buttons have 8 dp spacing. Icon-only controls use native vector drawing and accessible descriptions.
 - Body and UI text use sp. Large text reduces the number of library columns according to available width. Small-height reading layouts place mode switching first in the reading menu.
-- Library and catalog mastheads stay fixed. The catalog search field also stays fixed as results scroll. The bottom navigation connects Library, Search, Downloads and Settings, with an outline icon above each label, a tonal active indicator and 48 dp minimum targets. Hide the dock while the IME is open.
+- Library and catalog mastheads stay fixed. The catalog search field also stays fixed as results scroll. The bottom navigation connects Library, Search, Downloads and Settings, with outline icons, a tonal active indicator and 48 dp minimum targets. From 0.9.1 the labels are accessible names, and the dock sits 2 dp above the system navigation inset. Hide the dock while the IME is open.
 - Catalog book cards use a typographic book tile, genre, title/author, description excerpt and supplied download metadata. Details show the full available description and publication metadata; never invent missing fields. Download ordering applies to loaded book entries with supplied counters, preserves navigation feeds and retains the visible book during paging.
 - Library rows are virtualized through ListView. Covers use bounded decoding and a 24-entry bitmap cache.
 - Reading offers explicit Scroll (default) and Pages modes. Pages uses one page or an adaptive two-page spread with a quiet central rule. Scroll hides footer arrows. Pages turn through horizontal swipes, arrows, keyboard actions or optional taps in the outer quarter of each edge. Arrows reflect the book boundaries. Center taps toggle panels. Turns animate with a short 180 ms horizontal slide of existing layouts. System reduced motion disables the turn animation. Page turns use complete line boundaries and the full-text anchor stays fixed during resize. Scrolling keeps a bounded reading width. Controls respect system bars and screen insets.
@@ -46,7 +46,7 @@ Compact chapter header; quick appearance behind the type icon. Footer has contex
 - Quick type preview uses one line in 64 dp at normal phone sizes, 96 dp for large fonts/short windows; full settings use a 96 dp excerpt. Preview uses one line at large text sizes to avoid a clipped second line.
 - Matching book/chapter titles appear once in the reader; distinct chapters retain book context. Footnote spotlight uses a light 4 dp blur and 22% tint while keeping the source sentence sharp. Reading panel/page animations retain their existing timing and reduced-motion behavior.
 
-- Below 400 dp, library shelf filters get a full row, with filter and sort beside the shelf heading. The bottom dock uses two rows for large fonts on narrow, tall windows. Preserve 48 dp targets and 8 dp gaps.
+- Below 400 dp, library shelf filters get a full row, with filter and sort beside the shelf heading. Preserve 48 dp targets and 8 dp gaps.
 
 ## MJWatch alignment, 0.8.20
 
@@ -67,3 +67,10 @@ Compact chapter header; quick appearance behind the type icon. Footer has contex
 - The OPDS search field uses a rounded outline, a leading search icon, clear and submit actions. Title and author are explicit choices. Preserve the draft and result position when switching destinations. Show Retry with any existing results when a request fails.
 - At regular heights the reader's footer labels Chapters, Bookmark, Theme and RSVP using the same icon-over-label arrangement as the bottom navigation. The short-window footer keeps its compact arrows and progress.
 - The bundled Roboto face is shared by scroll layouts, page/spread layouts, quick previews and RSVP when selected. Its OFL notice is included with the app.
+
+## Graphite family, 0.9.1
+
+- The library masthead uses **MJReader** with a lavender MJ and keeps the add action at the trailing edge.
+- The default dark theme uses graphite with violet surfaces. Lavender is the initial accent when the user has no saved accent. Preserve the four explicit accents and all reading theme and layout settings. Paper, Dusk and Sepia retain their own reading palettes.
+- Lavender-to-pink gradients mark the add button, selected library chip, selected destination and library progress when the graphite lavender palette is active. The reading canvas uses a solid background. Reading and navigation toolbars use centered outline icons, accessible names, tooltips and 48 dp targets.
+- Launch starts with graphite, gradient corner shapes, a small MJ mark and the **MJ Reader** wordmark. The gradient book assembles above the static mark. Readiness interrupts the entrance and starts the 160 ms reveal. Reduced motion skips both animations.

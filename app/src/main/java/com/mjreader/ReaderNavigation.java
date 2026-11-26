@@ -30,58 +30,51 @@ final class ReaderNavigation {
         Context context = parent.getContext();
         var tabs = Tab.values();
         LinearLayout dock = new LinearLayout(context);
-        dock.setOrientation(LinearLayout.VERTICAL);
         dock.setTag(TAG);
         dock.setPadding(dp(context, 4), dp(context, 4), dp(context, 4), dp(context, 4));
-        dock.setBackground(shape(context, theme.surface(), 20));
-        int columns = twoRows(context) ? 2 : tabs.length;
-        for (int from = 0; from < tabs.length; from += columns) {
-            LinearLayout row = new LinearLayout(context);
-            for (int i = from; i < from + columns; i++) {
-                Tab tab = tabs[i];
-                Button item = item(context, theme, context.getString(tab.title), tab.icon, tab == selected, () -> navigate.accept(tab));
-                item.setTag(tab);
-                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -1, 1);
-                if (i > from) params.setMarginStart(dp(context, 8));
-                row.addView(item, params);
-            }
-            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
-            if (from > 0) rowParams.topMargin = dp(context, 8);
-            dock.addView(row, rowParams);
+        dock.setOrientation(LinearLayout.HORIZONTAL);
+        dock.setBackground(panel(context, theme));
+        for (Tab tab : tabs) {
+            Button button = item(context, theme, context.getString(tab.title), tab.icon, tab == selected, () -> navigate.accept(tab));
+            button.setTag(tab);
+            LinearLayout.LayoutParams itemParams = new LinearLayout.LayoutParams(0, dp(context, 48), 1);
+            if (tab != tabs[0]) itemParams.setMarginStart(dp(context, 8));
+            dock.addView(button, itemParams);
         }
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
         params.topMargin = dp(context, 8);
         parent.addView(dock, params);
         WindowInsets insets = parent.getRootWindowInsets();
         if (insets != null) updateInsets(parent, insets);
+        parent.requestApplyInsets();
     }
 
-    static boolean twoRows(Context context) {
-        var window = context.getResources().getConfiguration();
-        return window.fontScale >= 1.6f && window.screenWidthDp < 512 && window.screenHeightDp >= 480;
+    static GradientDrawable panel(Context context, ReaderOptions theme) {
+        var shape = theme.feature(context.getResources().getDisplayMetrics().density, 20);
+        shape.setStroke(dp(context, 1), theme.surfaceHigh());
+        return shape;
     }
 
     static Button item(Context context, ReaderOptions theme, String title, String icon, boolean selected, Runnable click) {
         Button button = new Button(context);
-        button.setText(title);
-        button.setTextSize(11);
-        button.setAllCaps(false);
-        button.setMaxLines(2);
-        button.setGravity(Gravity.CENTER);
+        button.setContentDescription(title);
+        button.setTooltipText(title);
         button.setMinWidth(dp(context, 48)); button.setMinimumWidth(dp(context, 48));
-        button.setMinHeight(dp(context, 56)); button.setMinimumHeight(dp(context, 56));
-        button.setPadding(0, dp(context, 4), 0, dp(context, 4));
+        button.setMinHeight(dp(context, 48)); button.setMinimumHeight(dp(context, 48));
         button.setStateListAnimator(null);
         button.setSelected(selected);
-        button.setTextColor(selected ? theme.ink() : theme.muted());
-        button.setBackground(theme.feedback(shape(context, theme.surface(), 12), context.getResources().getDisplayMetrics().density));
-        var indicator = new LayerDrawable(new Drawable[]{shape(context, selected ? theme.selection() : Color.TRANSPARENT, 18),
-                new ReaderIcon(context, icon, selected ? theme.onSelection() : theme.muted())});
+        float density = context.getResources().getDisplayMetrics().density;
+        boolean vivid = selected && theme.vividSelection();
+        var fill = vivid ? theme.vividSelection(density, 16)
+                : shape(context, selected ? theme.selection() : Color.TRANSPARENT, 16);
+        var indicator = new LayerDrawable(new Drawable[]{
+                theme.feedback(fill, density),
+                new ReaderIcon(context, icon, vivid ? 0xFFFFC2F7 : selected ? theme.onSelection() : theme.muted())});
+        indicator.setLayerInset(0, dp(context, 2), dp(context, 3), dp(context, 2), dp(context, 3));
         indicator.setLayerSize(1, dp(context, 24), dp(context, 24));
         indicator.setLayerGravity(1, Gravity.CENTER);
-        indicator.setBounds(0, 0, dp(context, 48), dp(context, 28));
-        button.setCompoundDrawablesRelative(null, indicator, null, null);
-        button.setCompoundDrawablePadding(dp(context, 2));
+        button.setBackground(indicator);
+        button.setPadding(0, 0, 0, 0);
         button.setOnClickListener(v -> click.run());
         return button;
     }

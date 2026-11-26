@@ -2,8 +2,8 @@
 
 <p align="center">
   <a href="https://github.com/MJSasha/mj-reader/actions/workflows/ci.yml"><img src="https://github.com/MJSasha/mj-reader/actions/workflows/ci.yml/badge.svg" alt="Checks"></a>
-  <a href="https://github.com/MJSasha/mj-reader/releases/latest"><img src="https://img.shields.io/github/v/release/MJSasha/mj-reader?label=APK&amp;color=c7ff68" alt="Latest APK"></a>
-  <img src="https://img.shields.io/badge/Android-8.0%2B-c7ff68?logo=android&amp;logoColor=c7ff68" alt="Android 8.0+">
+  <a href="https://github.com/MJSasha/mj-reader/releases/latest"><img src="https://img.shields.io/github/v/release/MJSasha/mj-reader?label=APK&amp;color=cda5ff" alt="Latest APK"></a>
+  <img src="https://img.shields.io/badge/Android-8.0%2B-cda5ff?logo=android&amp;logoColor=cda5ff" alt="Android 8.0+">
   <img src="https://img.shields.io/badge/Java-17-8bd9ff" alt="Java 17">
 </p>
 
@@ -27,21 +27,22 @@ Built with Java and Android Views, without runtime third-party dependencies.*
 <table>
   <tr>
     <td align="center"><b>Библиотека · тёмная</b></td>
-    <td align="center"><b>Чтение · сепия</b></td>
+    <td align="center"><b>Чтение · тёмная</b></td>
     <td align="center"><b>RSVP · свой темп</b></td>
   </tr>
   <tr>
     <td><img src="docs/images/library-dark.png" width="260" alt="Обложки в тёмной библиотеке MJReader"></td>
-    <td><img src="docs/images/reading.png" width="260" alt="Текст оригинальной истории в теме Сепия"></td>
+    <td><img src="docs/images/reading-dark.png" width="260" alt="Чтение оригинальной истории в тёмной теме"></td>
     <td><img src="docs/images/rsvp.png" width="260" alt="Чтение по одному слову в RSVP"></td>
   </tr>
 </table>
 
 <details>
-<summary><b>Светлая тема, настройки и раскрытый Fold</b></summary>
+<summary><b>Светлая тема, сепия, настройки и раскрытый Fold</b></summary>
 
 <table><tr>
 <td><img src="docs/images/library-light.png" width="260" alt="Светлая библиотека"></td>
+<td><img src="docs/images/reading.png" width="260" alt="Чтение оригинальной истории в теме Сепия"></td>
 <td><img src="docs/images/settings.png" width="260" alt="Отдельная страница оформления"></td>
 </tr></table>
 

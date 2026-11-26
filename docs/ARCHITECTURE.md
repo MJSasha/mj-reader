@@ -60,8 +60,9 @@ original text or reset identity just because better metadata became available.
 
 The UI is composed programmatically. Library rows are virtualized with `ListView`.
 On a fresh launcher start, `StartupBanner` stays above the library while the worker loads books.
-Once the entrance and loading finish, the banner dissolves over the ready library and restores access
-to its controls. Reduced motion makes this handoff immediate. Activity recreation and direct file
+When the positioned library is ready, it interrupts the emblem animation and starts a short, 160 ms
+reveal that restores access to the controls. If the library is still loading after 700 ms, the app
+shows the existing library loading screen. Reduced motion makes this handoff immediate. Activity recreation and direct file
 opens skip the banner.
 Columns depend on window width and font scale. Paged reading uses one page on phones
 and two pages from 640 dp of available reader width (more for large system fonts).

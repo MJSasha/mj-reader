@@ -5,15 +5,12 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.LinearGradient;
 import android.graphics.Paint;
-import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
-import android.text.SpannableString;
-import android.text.Spanned;
-import android.text.style.ForegroundColorSpan;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -21,14 +18,15 @@ import android.view.animation.PathInterpolator;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-/** The MJ family launch treatment, shared in spirit with MJWatch's orbital emblem. */
+/** Graphite family launch artwork shown while the library loads. */
 final class StartupBanner extends LinearLayout {
-    private static final int LIME = 0xFFC7FF68;
-    private static final int LIGHT = 0xFFF0F2EC;
     private final Emblem emblem;
+    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final RectF lavender = new RectF();
+    private final RectF pink = new RectF();
+    private LinearGradient lavenderFill, pinkFill;
     private ValueAnimator entrance;
     private ValueAnimator reveal;
-    private Runnable ready;
 
     StartupBanner(Context context) {
         super(context);
@@ -44,54 +42,53 @@ final class StartupBanner extends LinearLayout {
         int availableHeight = getResources().getConfiguration().screenHeightDp;
         boolean compact = availableHeight < 400;
         boolean largeText = getResources().getConfiguration().fontScale >= 1.6f;
-        int size = dp(Math.min(compact ? 144 : 184, Math.max(64, availableHeight / (largeText ? 3 : 2))));
+        int size = dp(Math.min(compact ? 104 : 148, Math.max(64, availableHeight / (largeText ? 3 : 2))));
         emblem = new Emblem(context);
         addView(emblem, new LayoutParams(size, size));
 
         TextView title = new TextView(context);
-        SpannableString wordmark = new SpannableString(context.getString(R.string.startup_title));
-        wordmark.setSpan(new ForegroundColorSpan(LIME), 0, 2, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        title.setText(wordmark);
-        title.setTextColor(LIGHT);
-        title.setTextSize(compact || largeText ? 32 : 44);
+        title.setText(R.string.launch_wordmark);
+        title.setTextColor(0xFFF5F1F8);
+        title.setTextSize(compact || largeText ? 20 : 24);
         title.setGravity(Gravity.CENTER);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setLetterSpacing(-.035f);
         addView(title, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
-
-        TextView status = new TextView(context);
-        status.setText(R.string.loading_books);
-        status.setTextColor(0xFFB6B9B2);
-        status.setTextSize(14);
-        status.setGravity(Gravity.CENTER);
-        status.setAccessibilityLiveRegion(ACCESSIBILITY_LIVE_REGION_POLITE);
-        LayoutParams statusSize = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
-        statusSize.topMargin = dp(8);
-        addView(status, statusSize);
         if (!ValueAnimator.areAnimatorsEnabled()) return;
         emblem.progress = 0f;
-        title.setAlpha(0f);
-        title.setTranslationY(dp(12));
-        status.setAlpha(0f);
         entrance = ValueAnimator.ofFloat(0f, 1f);
-        entrance.setDuration(520);
+        entrance.setDuration(340);
         entrance.addUpdateListener(animation -> {
-            float progress = (float) animation.getAnimatedValue();
-            emblem.progress = progress;
+            emblem.progress = (float) animation.getAnimatedValue();
             emblem.invalidate();
-            float wordmarkIn = Math.max(0f, Math.min(1f, (progress - .24f) / .55f));
-            title.setAlpha(wordmarkIn);
-            title.setTranslationY(dp(12) * (1f - wordmarkIn));
-            status.setAlpha(Math.max(0f, (progress - .55f) / .45f));
+            invalidate();
         });
-        entrance.addListener(new AnimatorListenerAdapter() {
-            @Override public void onAnimationEnd(Animator animation) {
-                entrance = null;
-                Runnable action = ready;
-                ready = null;
-                if (action != null) action.run();
-            }
-        });
+    }
+
+    @Override protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
+        if (width <= 0 || height <= 0) return;
+        lavender.set(-width * .84f, -height * .44f, width * .65f, height * .24f);
+        pink.set(width * .32f, height * .81f, width * 1.8f, height * 1.38f);
+        lavenderFill = new LinearGradient(0, 0, width * .62f, height * .24f,
+                0xFF3D285E, 0xFF7945AC, Shader.TileMode.CLAMP);
+        pinkFill = new LinearGradient(width * .38f, height * .83f, width, height,
+                0xFF492766, 0xFF9A327F, Shader.TileMode.CLAMP);
+    }
+
+    @Override protected void onDraw(Canvas canvas) {
+        super.onDraw(canvas);
+        float settled = Math.max(0f, 2f * emblem.progress - 1f);
+        paint.setShader(lavenderFill);
+        paint.setAlpha(Math.round(255 * (1f - settled)));
+        canvas.drawOval(lavender, paint);
+        canvas.save();
+        canvas.translate(0, getHeight());
+        canvas.scale(1f, -1f);
+        paint.setAlpha(Math.round(255 * settled));
+        canvas.drawOval(lavender, paint);
+        canvas.restore();
+        paint.setShader(pinkFill);
+        paint.setAlpha(255);
+        canvas.drawOval(pink, paint);
     }
 
     @Override public boolean dispatchTouchEvent(MotionEvent event) { return true; }
@@ -101,18 +98,12 @@ final class StartupBanner extends LinearLayout {
             complete.run();
             return;
         }
-        if (entrance != null) {
-            ready = () -> reveal(complete);
-            return;
-        }
+        if (entrance != null) entrance.cancel();
         reveal = ValueAnimator.ofFloat(0f, 1f);
-        reveal.setDuration(420);
+        reveal.setDuration(160);
         reveal.setInterpolator(new PathInterpolator(.4f, 0f, .2f, 1f));
         reveal.addUpdateListener(animation -> {
             float progress = (float) animation.getAnimatedValue();
-            float scale = 1f + .5f * progress;
-            emblem.setScaleX(scale);
-            emblem.setScaleY(scale);
             setAlpha(1f - progress);
         });
         reveal.addListener(new AnimatorListenerAdapter() {
@@ -130,7 +121,6 @@ final class StartupBanner extends LinearLayout {
     }
 
     @Override protected void onDetachedFromWindow() {
-        ready = null;
         if (entrance != null) entrance.cancel();
         if (reveal != null) {
             reveal.removeAllListeners();
@@ -143,49 +133,48 @@ final class StartupBanner extends LinearLayout {
     private int dp(float value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 
     private final class Emblem extends View {
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Drawable mark;
-        private final RectF orbit = new RectF();
-        private RadialGradient glow;
+        private final Drawable signature, book, ghost;
         private float progress = 1f;
 
         Emblem(Context context) {
             super(context);
-            mark = context.getDrawable(R.drawable.ic_launcher_foreground);
+            signature = context.getDrawable(R.drawable.ic_launcher_foreground).mutate();
+            book = context.getDrawable(R.drawable.ic_launcher_foreground).mutate();
+            ghost = context.getDrawable(R.drawable.ic_launcher_foreground).mutate();
             setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
         }
 
         @Override protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
-            float centerX = width / 2f, centerY = height / 2f, radius = Math.min(centerX, centerY);
-            if (radius <= 0) return;
-            glow = new RadialGradient(centerX, centerY, radius, 0x25C7FF68, 0x00C7FF68, Shader.TileMode.CLAMP);
-            orbit.set(centerX - radius * .83f, centerY - radius * .83f,
-                    centerX + radius * .83f, centerY + radius * .83f);
-            int half = Math.round(radius * .86f);
-            mark.setBounds(width / 2 - half, height / 2 - half, width / 2 + half, height / 2 + half);
+            int half = Math.round(Math.min(width, height) * .78f);
+            int top = height - dp(3) - Math.round(2 * half * 80f / 108f);
+            signature.setBounds(width / 2 - half, top, width / 2 + half, top + 2 * half);
+            book.setBounds(signature.getBounds());
+            ghost.setBounds(signature.getBounds());
         }
 
         @Override protected void onDraw(Canvas canvas) {
-            if (glow == null) return;
-            paint.setShader(glow);
-            paint.setStyle(Paint.Style.FILL);
-            paint.setAlpha(255);
-            canvas.drawRect(0, 0, getWidth(), getHeight(), paint);
-            paint.setShader(null);
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setColor(0x35C7FF68);
-            paint.setStrokeWidth(dp(1));
-            canvas.drawOval(orbit, paint);
-            paint.setColor(0xBAC7FF68);
-            paint.setStrokeWidth(dp(2));
-            paint.setStrokeCap(Paint.Cap.ROUND);
-            float angle = -148 + 52 * progress;
-            canvas.drawArc(orbit, angle, 40 + 43 * progress, false, paint);
-            canvas.drawArc(orbit, angle + 180, 40 + 43 * progress, false, paint);
+            // The launcher vector uses a 108-unit canvas with an empty seam at y=71
+            // between the book and the stationary MJ signature.
+            var bounds = signature.getBounds();
+            int seam = bounds.top + Math.round(bounds.height() * 71f / 108f);
             canvas.save();
-            float scale = .88f + .12f * progress;
-            canvas.scale(scale, scale, getWidth() / 2f, getHeight() / 2f);
-            mark.draw(canvas);
+            canvas.clipRect(0, seam, getWidth(), getHeight());
+            signature.draw(canvas);
+            canvas.restore();
+            if (progress <= 0f) return;
+            if (progress < 1f) {
+                canvas.save();
+                canvas.clipRect(0, 0, getWidth(), seam);
+                canvas.translate(-dp(20) * (1f - progress), dp(6) * (1f - progress));
+                ghost.setAlpha(Math.round(235 * progress * (1f - progress)));
+                ghost.draw(canvas);
+                canvas.restore();
+            }
+            canvas.save();
+            canvas.clipRect(0, 0, getWidth(), seam);
+            canvas.translate(dp(8) * (1f - progress), 0);
+            book.setAlpha(Math.round(255 * progress));
+            book.draw(canvas);
             canvas.restore();
         }
     }
