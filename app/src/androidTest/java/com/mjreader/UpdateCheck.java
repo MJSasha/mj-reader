@@ -34,6 +34,7 @@ final class UpdateCheck {
         String oldOptions = reader.getString("options", "{}");
         UpdateActivity screen = null; MainActivity library = null; File apk = null;
         try {
+            checkEstimate();
             if (AppUpdates.compare("0.10.0", "0.9.99") <= 0 || AppUpdates.compare("1.0.0", "1.0.0") != 0) throw new AssertionError("Semantic version ordering");
             rejects(() -> AppUpdates.compare("../1", "1.0.0"));
             JSONArray releases = new JSONArray().put(release("0.9.0")).put(release("0.10.0")).put(release("0.8.8"));
@@ -198,6 +199,15 @@ final class UpdateCheck {
             AppUpdates.cancel(context); if (apk != null) apk.delete();
             prefs.edit().clear().putBoolean("automatic", false).commit(); reader.edit().putString("options", oldOptions).commit();
         }
+    }
+    private static void checkEstimate() {
+        AppUpdates.DownloadEta eta = new AppUpdates.DownloadEta();
+        if (eta.sample(1, 0, 0, 1000) != -1 || eta.sample(1, 1000, 100, 1000) != -1
+                || eta.sample(1, 2000, 200, 1000) != 8 || eta.sample(1, 3000, 200, 1000) != -1
+                || eta.sample(1, 4000, 250, -1) != -1 || eta.sample(1, 5000, 300, 1000) != -1
+                || eta.sample(2, 6000, 400, 1000) != -1 || eta.sample(2, 7000, 500, 1000) != -1
+                || eta.sample(2, 8000, 600, 1000) != 4 || eta.sample(2, 9000, 1000, 1000) != -1)
+            throw new AssertionError("Download ETA requires two active intervals for the same known-size transfer");
     }
     private UpdateActivity openUpdate(Runnable open) {
         Instrumentation.ActivityMonitor monitor = test.addMonitor(UpdateActivity.class.getName(), null, false);

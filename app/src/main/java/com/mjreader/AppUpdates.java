@@ -25,6 +25,37 @@ final class AppUpdates {
             return new JSONObject().put("version", version).put("notes", notes).put("url", url).put("sha256", sha256).put("size", size);
         }
     }
+    static final class DownloadEta {
+        private long id = -1, sampledAt, sampledBytes, sampledTotal;
+        private int intervals;
+        private double bytesPerSecond;
+
+        long sample(long downloadId, long now, long bytes, long total) {
+            if (total <= 0 || bytes < 0 || bytes >= total) {
+                clear();
+                return -1;
+            }
+            long elapsed = now - sampledAt, transferred = bytes - sampledBytes;
+            if (id != downloadId || sampledTotal != total || elapsed <= 0 || elapsed > 5000 || transferred <= 0) {
+                intervals = 0;
+                bytesPerSecond = 0;
+            } else {
+                double recent = 1000d * transferred / elapsed;
+                bytesPerSecond = intervals == 0 ? recent : (bytesPerSecond + recent) / 2;
+                intervals++;
+            }
+            id = downloadId;
+            sampledAt = now;
+            sampledBytes = bytes;
+            sampledTotal = total;
+            return intervals < 2 ? -1 : (long) Math.ceil((total - bytes) / bytesPerSecond);
+        }
+
+        void clear() {
+            id = -1;
+            intervals = 0;
+        }
+    }
     static SharedPreferences prefs(Context context) { return context.getSharedPreferences("updates", 0); }
     static PackageInfo installed(Context context) throws PackageManager.NameNotFoundException {
         return context.getPackageManager().getPackageInfo(context.getPackageName(), PackageManager.GET_SIGNATURES);

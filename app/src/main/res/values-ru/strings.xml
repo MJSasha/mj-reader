@@ -18,4 +18,5 @@
     <string name="restart">С начала</string>
     <string name="speed">Скорость, слов/мин</string>
     <string name="book_progress">Позиция чтения</string>
+    <string name="update_time_remaining">Осталось примерно %1$s</string>
 </resources>
