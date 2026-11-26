@@ -2315,7 +2315,7 @@ public class MainActivity extends Activity {
         Button button = button(title, foreground, selected ? options.selection() : options.surface(), 12, action);
         if (selected && options.vividSelection()) {
             button.setTextColor(options.ink());
-            button.setBackground(feedback(options.vividSelection(getResources().getDisplayMetrics().density, 12)));
+            button.setBackground(feedback(options.vividFilter(getResources().getDisplayMetrics().density, 12)));
         }
         button.setSelected(selected);
         return button;
