@@ -9,7 +9,7 @@ Use Android Views with branded control drawing and dialogs, preserving native ac
 - Menu actions, settings sections and playback controls share 24-unit outline icons from ReaderIcon. Icons inherit semantic foreground colors; adjacent text supplies the accessible name.
 - Android controls have a minimum 48 dp target. Adjacent buttons have 8 dp spacing. Icon-only controls use native vector drawing and accessible descriptions.
 - Body and UI text use sp. Large text reduces the number of library columns according to available width. Small-height reading layouts place mode switching first in the reading menu.
-- Library and catalog mastheads stay fixed. The catalog search field also stays fixed as results scroll. The bottom navigation connects Library, Search, Downloads and Settings, with outline icons, a tonal active indicator and 48 dp minimum targets. From 0.9.1 the labels are accessible names, and the dock sits 2 dp above the system navigation inset. Hide the dock while the IME is open.
+- Library and catalog mastheads stay fixed. The catalog search field also stays fixed as results scroll. The bottom navigation connects Library, Search, Downloads and Settings, with outline icons, a tonal active indicator and 48 dp minimum targets. From 0.9.1 the labels are accessible names, and the dock uses the larger of the system bottom inset and 8 dp from 0.9.3. Hide the dock while the IME is open.
 - Catalog book cards use a typographic book tile, genre, title/author, description excerpt and supplied download metadata. Details show the full available description and publication metadata; never invent missing fields. Download ordering applies to loaded book entries with supplied counters, preserves navigation feeds and retains the visible book during paging.
 - Library rows are virtualized through ListView. Covers use bounded decoding and a 24-entry bitmap cache.
 - Reading offers explicit Scroll (default) and Pages modes. Pages uses one page or an adaptive two-page spread with a quiet central rule. Scroll hides footer arrows. Pages turn through horizontal swipes, arrows, keyboard actions or optional taps in the outer quarter of each edge. Arrows reflect the book boundaries. Center taps toggle panels. Turns animate with a short 180 ms horizontal slide of existing layouts. System reduced motion disables the turn animation. Page turns use complete line boundaries and the full-text anchor stays fixed during resize. Scrolling keeps a bounded reading width. Controls respect system bars and screen insets.
@@ -85,3 +85,9 @@ Compact chapter header; quick appearance behind the type icon. Footer has contex
 - The two colored pages slide and turn inward from opposite sides to meet at the spine. The small MJ mark
   and wordmark stay fixed while the gradient corner shapes shift. The startup identity fades out before the
   stationary library and its masthead become visible.
+
+## Startup tempo and bottom panels, 0.9.3
+
+- The pages assemble for 520 ms after the system splash. The library reveal takes 420 ms.
+- The navigation dock and text-reader footer use the larger of the system bottom inset and 8 dp.
+  This leaves space when the gesture indicator is hidden and uses the system spacing when it is shown.

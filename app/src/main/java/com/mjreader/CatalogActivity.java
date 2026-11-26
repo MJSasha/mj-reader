@@ -163,7 +163,9 @@ public class CatalogActivity extends Activity {
         ReaderOptions.observeWindow(root, () -> { if (!isDestroyed()) { rememberQuery(); rememberScroll(); render(); } });
         root.setOnApplyWindowInsetsListener((v, insets) -> { int width = getResources().getConfiguration().screenWidthDp;
             int gutter = Math.max(width >= 600 ? 24 : 16, (width - 1040) / 2);
-            v.setPadding(dp(gutter) + insets.getSystemWindowInsetLeft(), dp(8) + insets.getSystemWindowInsetTop(), dp(gutter) + insets.getSystemWindowInsetRight(), dp(2) + insets.getSystemWindowInsetBottom());
+            v.setPadding(dp(gutter) + insets.getSystemWindowInsetLeft(), dp(8) + insets.getSystemWindowInsetTop(),
+                    dp(gutter) + insets.getSystemWindowInsetRight(),
+                    ReaderNavigation.bottomPadding(this, insets.getSystemWindowInsetBottom()));
             ReaderNavigation.updateInsets(v, insets);
             return insets; });
         getWindow().setBackgroundDrawable(new ColorDrawable(theme.background()));

@@ -68,14 +68,17 @@ final class ReaderOptions {
     int outline() { return light() ? 0xFF786884 : 0xFF877399; }
     boolean vividSelection() { return number("theme", 0) == 0 && number("accent", DEFAULT_ACCENT) == DEFAULT_ACCENT; }
     android.graphics.drawable.GradientDrawable vividSelection(float density, int radius) {
-        var background = new android.graphics.drawable.GradientDrawable(
-                android.graphics.drawable.GradientDrawable.Orientation.TL_BR, new int[]{0xFF59347E, 0xFF702C63});
-        background.setCornerRadius(radius * density);
-        return background;
+        return gradient(density, radius, 0xFF462855, 0xFF59264C);
+    }
+    android.graphics.drawable.GradientDrawable vividFilter(float density, int radius) {
+        return gradient(density, radius, 0xFF6B34AD, 0xFF85267E);
     }
     android.graphics.drawable.GradientDrawable feature(float density, int radius) {
+        return gradient(density, radius, surfaceHigh(), surface());
+    }
+    private android.graphics.drawable.GradientDrawable gradient(float density, int radius, int start, int end) {
         var background = new android.graphics.drawable.GradientDrawable(
-                android.graphics.drawable.GradientDrawable.Orientation.TL_BR, new int[]{surfaceHigh(), surface()});
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR, new int[]{start, end});
         background.setCornerRadius(radius * density);
         return background;
     }
