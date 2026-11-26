@@ -137,6 +137,12 @@ public class MainActivity extends Activity {
                 && !launch.hasExtra(CatalogActivity.EXTRA_SETTINGS) && android.animation.ValueAnimator.areAnimatorsEnabled()) {
             StartupBanner banner = new StartupBanner(this);
             startup = banner;
+            banner.setWaitingForLibrary(() -> {
+                if (startup == banner && !libraryLoaded && !isDestroyed() && !isFinishing()) {
+                    dismissStartup();
+                    showLibraryLoading();
+                }
+            });
             setContentView(banner);
             if (Build.VERSION.SDK_INT >= 31) getSplashScreen().setOnExitAnimationListener(systemSplash -> {
                 if (startup == banner && android.animation.ValueAnimator.areAnimatorsEnabled())
@@ -146,12 +152,6 @@ public class MainActivity extends Activity {
                     banner.startEntrance();
                 }
             });
-            banner.postDelayed(() -> {
-                if (startup == banner && !libraryLoaded && !isDestroyed() && !isFinishing()) {
-                    dismissStartup();
-                    showLibraryLoading();
-                }
-            }, 700);
         } else showLibraryLoading();
         worker.execute(() -> {
             try {
