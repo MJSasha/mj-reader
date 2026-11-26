@@ -22,6 +22,7 @@ final class ReaderDialogs {
     private CharSequence[] items;
     private boolean[] checked;
     private DialogInterface.OnClickListener itemClick;
+    private int selectedItem = -1;
     private DialogInterface.OnMultiChoiceClickListener multiClick;
     private final Map<Integer, String> labels = new LinkedHashMap<>();
     private final Map<Integer, DialogInterface.OnClickListener> actions = new LinkedHashMap<>();
@@ -33,6 +34,10 @@ final class ReaderDialogs {
     ReaderDialogs setView(View value) { custom = value; return this; }
     ReaderDialogs setItems(CharSequence[] values, DialogInterface.OnClickListener click) {
         items = values; itemClick = click; return this;
+    }
+    ReaderDialogs setItems(CharSequence[] values, int selected, DialogInterface.OnClickListener click) {
+        selectedItem = selected;
+        return setItems(values, click);
     }
     ReaderDialogs setMultiChoiceItems(CharSequence[] values, boolean[] states, DialogInterface.OnMultiChoiceClickListener click) {
         items = values; checked = states.clone(); multiClick = click; return this;
@@ -102,8 +107,12 @@ final class ReaderDialogs {
                     final int index = i;
                     Button item = control((checked != null && checked[i] ? "✓  " : "") + items[i], false);
                     item.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-                    item.setBackground(theme.feedback(shape(theme.surfaceHigh(), 12), context.getResources().getDisplayMetrics().density));
-                    item.setSelected(checked != null && checked[i]);
+                    boolean selected = i == selectedItem;
+                    item.setBackground(theme.feedback(shape(selected ? theme.selection() : theme.surfaceHigh(), 12),
+                            context.getResources().getDisplayMetrics().density));
+                    item.setSelected(selected || checked != null && checked[i]);
+                    if (selected) item.setCompoundDrawablesRelativeWithIntrinsicBounds(item.getCompoundDrawablesRelative()[0],
+                            null, new ReaderIcon(context, "check", theme.accent()), null);
                     item.setOnClickListener(view -> {
                         if (checked != null) {
                             checked[index] = !checked[index];
@@ -229,7 +238,11 @@ final class ReaderDialogs {
             default -> false;
         };
         int foreground = destructive ? theme.error() : primary ? theme.onAccent() : theme.ink();
-        button.setCompoundDrawablesRelativeWithIntrinsicBounds(ReaderIcon.forLabel(context, label, foreground), null, null, null);
+        ReaderIcon icon = ReaderIcon.forLabel(context, label, foreground);
+        if (icon != null) {
+            button.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, null, null, null);
+            button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        }
         button.setCompoundDrawablePadding(dp(12));
         button.setTextColor(foreground);
         button.setPadding(dp(16), dp(12), dp(16), dp(12));

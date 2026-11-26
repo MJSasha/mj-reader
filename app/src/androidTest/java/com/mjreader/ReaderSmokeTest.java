@@ -1008,6 +1008,7 @@ public class ReaderSmokeTest extends Instrumentation {
         LinearLayout footer = (LinearLayout) field(screen, "footer");
         panelStates((LinearLayout) footer.getChildAt(1), 0, 2, "reader-panel-" + theme,
                 "contents", "bookmark", "theme", "rsvp");
+        panelStates((LinearLayout) footer.getChildAt(0), 0, 1, "reader-progress-" + theme, "counter");
     }
     private void panelStates(LinearLayout tools, int first, int stride, String prefix, String... actions) throws Exception {
         setInTouchMode(true);

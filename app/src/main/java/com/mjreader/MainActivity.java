@@ -687,9 +687,10 @@ public class MainActivity extends Activity {
     private void filterDialog() {
         String[] names = {tr("Все книги", "All books"), tr("Читаю", "Reading"), tr("Хочу прочитать", "Want to read"),
                 tr("Прочитано", "Finished"), tr("Избранное", "Favorites"), tr("Коллекции", "Collections"), tr("Удалённые", "Deleted")};
-        dialogs().setTitle(tr("Показать", "Show")).setItems(names, (dialog, index) -> {
+        String[] filters = {"all", "reading", "want", "done", "favorite", "collection", "trash"};
+        dialogs().setTitle(tr("Показать", "Show")).setItems(names, Arrays.asList(filters).indexOf(filter), (dialog, index) -> {
             if (index == 5) { collectionsDialog(); return; }
-            filter = new String[]{"all", "reading", "want", "done", "favorite", "collection", "trash"}[index];
+            filter = filters[index];
             libraryRow = 0;
             libraryBookIndex = -1; libraryOffset = 0;
             library();
@@ -1261,10 +1262,13 @@ public class MainActivity extends Activity {
         counter.setGravity(Gravity.CENTER);
         counter.setMinHeight(dp(48));
         if (compact) { counter.setMaxLines(1); counter.setEllipsize(TextUtils.TruncateAt.END); }
+        else counter.setTextColor(new ColorStateList(new int[][]{{android.R.attr.state_pressed},
+                {android.R.attr.state_hovered}, {}}, new int[]{options.ink(), options.ink(), options.muted()}));
         counter.setContentDescription(tr("Прогресс и переход по книге", "Reading progress and navigation"));
         counter.setOnClickListener(v -> readingNavigation());
         counter.setFocusable(true);
-        counter.setBackground(feedback(shape(compact ? options.surface() : Color.TRANSPARENT, 14)));
+        counter.setBackground(compact ? feedback(shape(options.surface(), 14))
+                : options.tonalFeedback(shape(Color.TRANSPARENT, 14), getResources().getDisplayMetrics().density));
         navigation.addView(counter, new LinearLayout.LayoutParams(0, -2, 1));
         if (options.flag("pages", false)) {
             space(navigation);

@@ -74,7 +74,7 @@ final class ReaderNavigation {
         var fill = vivid ? theme.vividSelection(density, 16)
                 : shape(context, selected ? theme.selection() : Color.TRANSPARENT, 16);
         var indicator = new LayerDrawable(new Drawable[]{
-                localFeedback ? theme.iconFeedback(fill, density) : theme.feedback(fill, density),
+                localFeedback ? theme.tonalFeedback(fill, density) : theme.feedback(fill, density),
                 new ReaderIcon(context, icon, vivid ? 0xFFFFC2F7 : selected ? theme.onSelection() : theme.muted())});
         indicator.setLayerInset(0, dp(context, 2), dp(context, 3), dp(context, 2), dp(context, 3));
         indicator.setLayerSize(1, dp(context, 24), dp(context, 24));

@@ -99,7 +99,7 @@ final class ReaderOptions {
                 (int) (android.graphics.Color.blue(base) * .88f + overlay * .12f));
         return feedback(normal, density, base, active, active);
     }
-    android.graphics.drawable.Drawable iconFeedback(android.graphics.drawable.GradientDrawable normal, float density) {
+    android.graphics.drawable.Drawable tonalFeedback(android.graphics.drawable.GradientDrawable normal, float density) {
         int base = normal.getColor().getDefaultColor();
         int tint = light() ? accent() : ink();
         return feedback(normal, density, base, iconTint(base, tint, light() ? 64 : 46),
