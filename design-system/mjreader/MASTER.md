@@ -74,3 +74,14 @@ Compact chapter header; quick appearance behind the type icon. Footer has contex
 - The default dark theme uses graphite with violet surfaces. Lavender is the initial accent when the user has no saved accent. Preserve the four explicit accents and all reading theme and layout settings. Paper, Dusk and Sepia retain their own reading palettes.
 - Lavender-to-pink gradients mark the add button, selected library chip, selected destination and library progress when the graphite lavender palette is active. The reading canvas uses a solid background. Reading and navigation toolbars use centered outline icons, accessible names, tooltips and 48 dp targets.
 - Launch starts with graphite, gradient corner shapes, a small MJ mark and the **MJ Reader** wordmark. The gradient book assembles above the static mark. Readiness interrupts the entrance and starts the 160 ms reveal. Reduced motion skips both animations.
+
+## Accent and launch corrections, 0.9.2
+
+- Accent index zero now renders Pink across all themes. The saved index stays in place. Ice, Lavender
+  and Amber keep their indices. Lavender remains the default when no option was saved.
+- Android download notification progress uses the family lavender color for the system's light or dark appearance.
+- On a cold launcher start, assemble the book for 280 ms after the system splash and reveal the ready library
+  over 100 ms. Warm launches, Android reduced motion and external opens skip the custom banner.
+- The two colored pages slide and turn inward from opposite sides to meet at the spine. The small MJ mark
+  and wordmark stay fixed while the gradient corner shapes shift. The startup identity fades out before the
+  stationary library and its masthead become visible.

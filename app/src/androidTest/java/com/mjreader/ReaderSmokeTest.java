@@ -17,6 +17,7 @@ import org.json.*;
 public class ReaderSmokeTest extends Instrumentation {
     private String updateFixture;
     private volatile boolean watchStartup;
+    private volatile java.util.concurrent.CountDownLatch holdLibrary;
     private android.animation.ValueAnimator startupReveal;
     private boolean updatesOnly, visualOnly, sampleOnly, readerOnly, benchmarkOnly, catalogOnly, liveCatalog, adaptiveOnly, motionOnly, showcaseOnly;
     @Override public void onCreate(Bundle arguments) {
@@ -1170,6 +1171,13 @@ public class ReaderSmokeTest extends Instrumentation {
         throw new AssertionError("Pages were not laid out");
     }
     @Override public void callActivityOnCreate(Activity activity, Bundle state) {
+        var gate = holdLibrary;
+        if (gate != null && activity instanceof MainActivity) {
+            ((java.util.concurrent.ExecutorService) field(activity, "worker")).execute(() -> {
+                try { gate.await(5, java.util.concurrent.TimeUnit.SECONDS); }
+                catch (InterruptedException error) { Thread.currentThread().interrupt(); }
+            });
+        }
         super.callActivityOnCreate(activity, state);
         if (!watchStartup || !(activity instanceof MainActivity)) return;
         View decor = activity.getWindow().getDecorView();
@@ -1195,10 +1203,20 @@ public class ReaderSmokeTest extends Instrumentation {
                 throw new AssertionError("Splash must show the MJ Reader wordmark without a loading caption");
             entrance.start();
             early.reveal(() -> complete[0] = true);
-            if (!(field(early, "reveal") instanceof android.animation.ValueAnimator reveal) || entrance.isRunning())
-                throw new AssertionError("A ready library must interrupt the entrance immediately");
+            if (field(early, "reveal") != null || !entrance.isRunning())
+                throw new AssertionError("A ready library must let the entrance finish");
+            entrance.end();
+            if (!(field(early, "reveal") instanceof android.animation.ValueAnimator reveal))
+                throw new AssertionError("Finished entrance must reveal a ready library");
             reveal.end();
-            if (!complete[0]) throw new AssertionError("Interrupted startup never completed");
+            if (!complete[0]) throw new AssertionError("Startup never completed");
+            for (int theme = 0; theme < 4; theme++) {
+                ReaderOptions legacy = new ReaderOptions("{\"accent\":0,\"theme\":" + theme + ",\"size\":26}");
+                ReaderOptions defaults = new ReaderOptions("{\"theme\":" + theme + "}");
+                if (legacy.accent() != (legacy.light() ? 0xFF8B276B : 0xFFFFA4E2)
+                        || defaults.accent() != defaults.brand() || legacy.number("size", 0) != 26)
+                    throw new AssertionError("Legacy index zero must become pink without resetting reading options");
+            }
         });
         Intent launch = new Intent(Intent.ACTION_MAIN).setClass(context, MainActivity.class)
                 .addCategory(Intent.CATEGORY_LAUNCHER).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -1213,16 +1231,6 @@ public class ReaderSmokeTest extends Instrumentation {
                 if (!paused[0]) Thread.sleep(10);
             }
             if (!paused[0]) throw new AssertionError("Missing animated startup reveal on a drawn frame");
-            String[] stages = {"wordmark", "assembly", "book"};
-            for (int stage = 0; stage < stages.length; stage++) {
-                float fraction = stage / 2f;
-                runOnMainSync(() -> {
-                    StartupBanner banner = (StartupBanner) field(activity, "startup");
-                    ((android.animation.ValueAnimator) field(banner, "entrance")).setCurrentFraction(fraction);
-                    startupReveal.setCurrentFraction(0f);
-                });
-                capture("startup-" + stages[stage]);
-            }
             boolean[] checked = {false};
             for (int attempt = 0; attempt < 200 && !checked[0]; attempt++) {
                 runOnMainSync(() -> {
@@ -1233,6 +1241,8 @@ public class ReaderSmokeTest extends Instrumentation {
                     if (!library.isLaidOut()) return;
                     reveal.setCurrentFraction(.5f);
                     if (banner.getAlpha() <= 0f || banner.getAlpha() >= 1f
+                            || field(banner, "entrance") != null
+                            || banner.getChildAt(0).getAlpha() != 0f || banner.getChildAt(1).getAlpha() != 0f
                             || library.getParent() != banner.getParent() || library.getAlpha() != 1f || library.getScaleX() != 1f
                             || library.getImportantForAccessibility() != View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS)
                         throw new AssertionError("Startup must reveal the positioned library beneath the fading splash");
@@ -1246,6 +1256,30 @@ public class ReaderSmokeTest extends Instrumentation {
             }
             if (!checked[0]) throw new AssertionError("Missing animated startup reveal on a drawn frame");
         } finally { runOnMainSync(() -> { startupReveal = null; activity.finish(); }); }
+        MainActivity warm = (MainActivity) startActivitySync(launch);
+        try {
+            runOnMainSync(() -> {
+                if (field(warm, "startup") != null) throw new AssertionError("Warm launch replayed the startup animation");
+            });
+        } finally { runOnMainSync(warm::finish); }
+        runOnMainSync(() -> setField(activity, "activityCreated", false));
+        var gate = new java.util.concurrent.CountDownLatch(1);
+        holdLibrary = gate;
+        MainActivity slow;
+        try { slow = (MainActivity) startActivitySync(launch); }
+        finally { holdLibrary = null; }
+        try {
+            boolean[] loading = {false};
+            for (int attempt = 0; attempt < 125 && !loading[0]; attempt++) {
+                runOnMainSync(() -> loading[0] = field(slow, "startup") == null
+                        && find(slow.getWindow().getDecorView(), context.getString(R.string.loading_books)) != null);
+                if (!loading[0]) Thread.sleep(20);
+            }
+            if (!loading[0]) throw new AssertionError("Slow startup must use the normal library loading indicator");
+            capture("startup-slow-loading");
+            gate.countDown();
+            awaitField(slow, "librarySearch");
+        } finally { gate.countDown(); runOnMainSync(slow::finish); }
     }
     private void pagesCheck() throws Exception {
         Context context = getTargetContext();
@@ -1263,7 +1297,7 @@ public class ReaderSmokeTest extends Instrumentation {
                         "Maya opened the observatory. Stars filled the window. ".repeat(240) + "</p><p><img src='art.png' alt='The stars'/></p><p>The last page.</p></body></html>");
                 android.graphics.Bitmap art = android.graphics.Bitmap.createBitmap(600, 240, android.graphics.Bitmap.Config.ARGB_8888);
                 android.graphics.Canvas canvas = new android.graphics.Canvas(art); canvas.drawColor(0xff18334b);
-                android.graphics.Paint paint = new android.graphics.Paint(); paint.setColor(0xffc7ff68);
+                android.graphics.Paint paint = new android.graphics.Paint(); paint.setColor(0xffcda5ff);
                 canvas.drawCircle(300, 120, 80, paint);
                 zip.putNextEntry(new ZipEntry("OPS/art.png")); art.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, zip); zip.closeEntry(); art.recycle();
             }

@@ -17,6 +17,7 @@ import java.util.function.IntConsumer;
 
 public class MainActivity extends Activity {
     private static final int CATALOG_REQUEST = 8;
+    private static boolean activityCreated;
     private final ArrayList<Uri> pendingFiles = new ArrayList<>();
     private boolean libraryLoaded;
     private String pendingDownloadBook;
@@ -95,6 +96,8 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         setTheme(R.style.AppTheme);
         super.onCreate(state);
+        boolean firstActivity = !activityCreated;
+        activityCreated = true;
         active = new java.lang.ref.WeakReference<>(this);
         importing = batchRunning;
         prefs = getSharedPreferences("reader", MODE_PRIVATE);
@@ -129,11 +132,20 @@ public class MainActivity extends Activity {
         Intent launch = getIntent();
         if (state == null && launch != null) pendingDownloadBook = launch.getStringExtra(CatalogActivity.EXTRA_READ_BOOK);
         if (state == null) receiveFile(launch);
-        if (state == null && launch != null && Intent.ACTION_MAIN.equals(launch.getAction())
-                && launch.hasCategory(Intent.CATEGORY_LAUNCHER)) {
+        if (firstActivity && state == null && launch != null && Intent.ACTION_MAIN.equals(launch.getAction())
+                && launch.hasCategory(Intent.CATEGORY_LAUNCHER) && pendingDownloadBook == null
+                && !launch.hasExtra(CatalogActivity.EXTRA_SETTINGS) && android.animation.ValueAnimator.areAnimatorsEnabled()) {
             StartupBanner banner = new StartupBanner(this);
             startup = banner;
             setContentView(banner);
+            if (Build.VERSION.SDK_INT >= 31) getSplashScreen().setOnExitAnimationListener(systemSplash -> {
+                if (startup == banner && android.animation.ValueAnimator.areAnimatorsEnabled())
+                    banner.handoffSystemSplash(systemSplash, systemSplash::remove);
+                else {
+                    systemSplash.remove();
+                    banner.startEntrance();
+                }
+            });
             banner.postDelayed(() -> {
                 if (startup == banner && !libraryLoaded && !isDestroyed() && !isFinishing()) {
                     dismissStartup();
@@ -180,6 +192,7 @@ public class MainActivity extends Activity {
     private void dismissStartup() {
         StartupBanner banner = startup;
         startup = null;
+        if (Build.VERSION.SDK_INT >= 31) getSplashScreen().clearOnExitAnimationListener();
         if (banner.getParent() instanceof ViewGroup host) host.removeView(banner);
         if (root != null) {
             root.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
@@ -2068,7 +2081,7 @@ public class MainActivity extends Activity {
                     value -> { options.put("hyphenation", value); changedOptions(); });
             content = settingsGroup(page, "palette", tr("Цвет и атмосфера", "Color & atmosphere"));
             themeChoices(content);
-            choose(content, "palette", tr("Акцент", "Accent"), new String[]{tr("Лайм", "Lime"), tr("Лёд", "Ice"), tr("Лаванда", "Lavender"), tr("Янтарь", "Amber")},
+            choose(content, "palette", tr("Акцент", "Accent"), new String[]{tr("Розовый", "Pink"), tr("Лёд", "Ice"), tr("Лаванда", "Lavender"), tr("Янтарь", "Amber")},
                     options.number("accent", ReaderOptions.DEFAULT_ACCENT), value -> { options.put("accent", value); changedOptions(); });
             content = settingsGroup(page, "page", tr("Страница", "Page layout"));
             range(content, tr("Поля", "Margins"), 0, 40, options.number("margin", 8),

@@ -49,24 +49,21 @@ final class ReaderOptions {
     }
     int ink() { return switch (number("theme", 0)) { case 1 -> 0xFFF3EEF7; case 2 -> 0xFF231E28; case 3 -> 0xFF20251F; default -> 0xFFF5F1F8; }; }
     int muted() { return switch (number("theme", 0)) { case 1 -> 0xFFC3B8D2; case 2 -> 0xFF574C60; case 3 -> 0xFF4D584E; default -> 0xFFC7BCD9; }; }
-    int brand() { return light() ? 0xFF64348A : 0xFFCDA5FF; }
+    static int brand(boolean light) { return light ? 0xFF64348A : 0xFFCDA5FF; }
+    int brand() { return brand(light()); }
     int accent() {
-        int[] dark = {0xFFC7FF68, 0xFF8BD9FF, brand(), 0xFFFFCF82};
-        int[] light = {0xFF345A05, 0xFF07577A, brand(), 0xFF785000};
+        int[] dark = {0xFFFFA4E2, 0xFF8BD9FF, brand(), 0xFFFFCF82};
+        int[] light = {0xFF8B276B, 0xFF07577A, brand(), 0xFF785000};
         return (light() ? light : dark)[Math.max(0, Math.min(3, number("accent", DEFAULT_ACCENT)))];
     }
     int selection() {
-        if (number("accent", DEFAULT_ACCENT) == 0) {
-            if (number("theme", 0) == 0) return 0xFF303D28;
-            if (number("theme", 0) == 2) return 0xFFDCE9CB;
-        }
         int surface = surface(), accent = accent();
         return Color.rgb(
                 (7 * Color.red(surface) + Color.red(accent)) / 8,
                 (7 * Color.green(surface) + Color.green(accent)) / 8,
                 (7 * Color.blue(surface) + Color.blue(accent)) / 8);
     }
-    int onSelection() { return number("theme", 0) == 2 && number("accent", DEFAULT_ACCENT) == 0 ? accent() : light() ? ink() : accent(); }
+    int onSelection() { return light() ? ink() : accent(); }
     int error() { return light() ? 0xFFA32323 : 0xFFFFB4AB; }
     int outline() { return light() ? 0xFF786884 : 0xFF877399; }
     boolean vividSelection() { return number("theme", 0) == 0 && number("accent", DEFAULT_ACCENT) == DEFAULT_ACCENT; }

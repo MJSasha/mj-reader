@@ -40,6 +40,16 @@ final class CatalogCheck {
             Notification preparing = BookDownloadService.notification(context, null, 0, -1, 0);
             require(Notification.Builder.recoverBuilder(context, preparing).getStyle() instanceof Notification.ProgressStyle progress
                     && progress.isProgressIndeterminate(), "Unknown download size leaves native progress indeterminate");
+            for (boolean light : new boolean[]{true, false}) {
+                var configuration = new android.content.res.Configuration(context.getResources().getConfiguration());
+                configuration.uiMode = light ? android.content.res.Configuration.UI_MODE_NIGHT_NO
+                        : android.content.res.Configuration.UI_MODE_NIGHT_YES;
+                Context themed = context.createConfigurationContext(configuration);
+                Notification transfer = BookDownloadService.notification(themed, "Orbit", 250, 1000, 0);
+                require(Notification.Builder.recoverBuilder(themed, transfer).getStyle() instanceof Notification.ProgressStyle progress
+                        && progress.getProgressSegments().get(0).getColor() == ReaderOptions.brand(light),
+                        "Download progress uses the family accent for the system appearance");
+            }
         }
         String before = context.getSharedPreferences("reader", 0).getString("options", "{}"), catalogBefore = context.getSharedPreferences("reader", 0).getString("catalog", "auto");
         byte[] epub = epub(); String original = "Привет из каталога. Hello from the catalog. " + System.currentTimeMillis();
