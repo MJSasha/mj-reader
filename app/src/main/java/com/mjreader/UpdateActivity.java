@@ -12,8 +12,9 @@ import android.widget.*;
 
 /** Downloads persist in Android's DownloadManager across navigation and process death. */
 public class UpdateActivity extends Activity {
+    private static final String EXTRA_OFFER = "com.mjreader.UPDATE_OFFER";
     private ReaderOptions theme;
-    private TextView status, available, details;
+    private TextView status, remaining, available, details;
     private ScrollView page;
     private LinearLayout transfer;
     private ProgressBar progress;
@@ -21,9 +22,11 @@ public class UpdateActivity extends Activity {
     private AppUpdates.Release release;
     private String message = "";
     private boolean busy, checking, polling, resumed, ready, failed;
+    private boolean openCompletedOffer;
     private int percent = -1;
     private int generation;
     private long verifiedId = -1;
+    private long etaSeconds = -1;
     private final SharedPreferences.OnSharedPreferenceChangeListener changed = (prefs, key) -> {
         if (("release".equals(key) || "checked".equals(key)) && !busy && downloadId() < 0 && !isDestroyed()) {
             release = AppUpdates.cached(this);
@@ -32,9 +35,13 @@ public class UpdateActivity extends Activity {
         }
     };
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final AppUpdates.DownloadEta downloadEta = new AppUpdates.DownloadEta();
     private final Runnable refresh = new Runnable() {
         @Override public void run() { poll(); if (resumed) handler.postDelayed(this, 1000); }
     };
+    static Intent offer(Context context, AppUpdates.Release release) throws org.json.JSONException {
+        return new Intent(context, UpdateActivity.class).putExtra(EXTRA_OFFER, release.json().toString());
+    }
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         theme = ReaderOptions.load(getSharedPreferences("reader", 0), null);
@@ -43,9 +50,21 @@ public class UpdateActivity extends Activity {
         message = release == null ? tr("Проверьте, доступна ли новая версия.", "Check for a new version.") : tr("Доступно обновление", "Update available");
         render();
         AppUpdates.prefs(this).registerOnSharedPreferenceChangeListener(changed);
+        if (state == null && getIntent().hasExtra(EXTRA_OFFER)) {
+            AppUpdates.Release offered;
+            try { offered = AppUpdates.decode(getIntent().getStringExtra(EXTRA_OFFER)); }
+            catch (Exception ignored) { return; }
+            if (AppUpdates.compare(offered.version(), AppUpdates.version(this)) > 0) {
+                release = offered;
+                act(true);
+            }
+        }
     }
     @Override protected void onResume() { super.onResume(); resumed = true; handler.post(refresh); }
-    @Override protected void onPause() { resumed = false; handler.removeCallbacks(refresh); super.onPause(); }
+    @Override protected void onPause() {
+        resumed = false; downloadEta.clear(); etaSeconds = -1; update();
+        handler.removeCallbacks(refresh); super.onPause();
+    }
     @Override protected void onDestroy() { handler.removeCallbacksAndMessages(null); AppUpdates.prefs(this).unregisterOnSharedPreferenceChangeListener(changed); super.onDestroy(); }
     private String tr(String ru, String en) { return getResources().getConfiguration().getLocales().get(0).getLanguage().equals("ru") ? ru : en; }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
@@ -81,7 +100,19 @@ public class UpdateActivity extends Activity {
         version.addView(text(tr("Установлена версия ", "Installed version ") + AppUpdates.version(this), 14, theme.muted()));
         identity.addView(version, new LinearLayout.LayoutParams(0, -2, 1)); installed.addView(identity);
         status = text("", 16, theme.muted()); status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        status.setPadding(0, dp(12), 0, dp(12)); content.addView(status);
+        LinearLayout summary = new LinearLayout(this);
+        summary.setGravity(Gravity.CENTER_VERTICAL);
+        summary.setPadding(0, dp(12), 0, dp(12));
+        summary.addView(status, new LinearLayout.LayoutParams(0, -2, 1));
+        remaining = text("", 14, theme.accent());
+        remaining.setSingleLine(true);
+        remaining.setPaddingRelative(dp(8), 0, 0, 0);
+        remaining.setCompoundDrawablePadding(dp(4));
+        ReaderIcon clock = new ReaderIcon(this, "clock", theme.accent());
+        clock.setBounds(0, 0, dp(18), dp(18));
+        remaining.setCompoundDrawablesRelative(clock, null, null, null);
+        summary.addView(remaining, new LinearLayout.LayoutParams(-2, -2));
+        content.addView(summary);
         transfer = card(content);
         available = heading("", 18); available.setPadding(0, 0, 0, dp(8)); transfer.addView(available);
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -179,6 +210,15 @@ public class UpdateActivity extends Activity {
         if (!status.getText().toString().equals(message)) status.setText(message);
         status.setTextColor(failed ? theme.error() : theme.muted());
         boolean downloading = downloadId() >= 0;
+        boolean showEstimate = etaSeconds >= 0 && downloading && !busy && !ready && !failed;
+        remaining.setVisibility(showEstimate ? View.VISIBLE : View.GONE);
+        if (showEstimate) {
+            String time = android.text.format.DateUtils.formatElapsedTime(etaSeconds);
+            if (!time.contentEquals(remaining.getText())) {
+                remaining.setText(time);
+                remaining.setContentDescription(getString(R.string.update_time_remaining, time));
+            }
+        }
         transfer.setVisibility(release != null || downloading ? View.VISIBLE : View.GONE);
         available.setVisibility(release == null ? View.GONE : View.VISIBLE);
         available.setText(release == null ? "" : "MJReader " + release.version() + " · " + android.text.format.Formatter.formatShortFileSize(this, release.size()));
@@ -215,7 +255,8 @@ public class UpdateActivity extends Activity {
             }
         });
     }
-    private void act() {
+    private void act() { act(false); }
+    private void act(boolean fromOffer) {
         if (release == null || busy) return;
         AppUpdates.Release selected = release; busy = true; generation++; update();
         Context context = getApplicationContext(); boolean installing = ready;
@@ -225,14 +266,29 @@ public class UpdateActivity extends Activity {
                     AppUpdates.verify(context, selected);
                     Uri uri = context.getSystemService(DownloadManager.class).getUriForDownloadedFile(downloadId());
                     if (uri == null) throw new java.io.IOException("Missing download");
-                    runOnUiThread(() -> { if (isDestroyed()) return; busy = false; update(); install(uri); });
+                    runOnUiThread(() -> {
+                        if (isDestroyed() || isFinishing()) return;
+                        busy = false; update();
+                        if (resumed) install(uri);
+                    });
                 } else {
-                    AppUpdates.download(context, selected);
+                    boolean existing = fromOffer && matchingDownload(context, selected);
+                    if (!existing) AppUpdates.download(context, selected);
                     runOnUiThread(() -> { if (isDestroyed()) return; busy = false; failed = false; verifiedId = -1; percent = -1;
+                        openCompletedOffer = existing;
                         message = tr("Загрузка… Можно вернуться к чтению.", "Downloading… You can return to reading."); update(); poll(); });
                 }
             } catch (Exception e) { error(tr("Не удалось подготовить обновление. Повторите загрузку.", "Could not prepare the update. Download it again.")); }
         });
+    }
+    private static boolean matchingDownload(Context context, AppUpdates.Release offered) {
+        SharedPreferences prefs = AppUpdates.prefs(context);
+        if (prefs.getLong("download", -1) < 0) return false;
+        try {
+            AppUpdates.Release pending = AppUpdates.decode(prefs.getString("pending", ""));
+            return offered.version().equals(pending.version()) && offered.sha256().equals(pending.sha256())
+                    && offered.size() == pending.size();
+        } catch (Exception ignored) { return false; }
     }
     private void install(Uri uri) {
         if (!getPackageManager().canRequestPackageInstalls()) {
@@ -253,6 +309,7 @@ public class UpdateActivity extends Activity {
         AppUpdates.WORKER.execute(() -> {
             String result; boolean complete = false, failure = false; AppUpdates.Release pending = null;
             int downloaded = -1;
+            long runningBytes = -1, runningTotal = -1, sampledAt = 0;
             try {
                 pending = AppUpdates.decode(AppUpdates.prefs(context).getString("pending", ""));
                 if (AppUpdates.compare(pending.version(), AppUpdates.version(context)) <= 0) {
@@ -261,8 +318,14 @@ public class UpdateActivity extends Activity {
                     if (cursor == null || !cursor.moveToFirst()) throw new java.io.IOException("Download missing");
                     int state = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
                     long done = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
+                    long total = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
                     if (done > pending.size()) { AppUpdates.cancel(context); throw new java.io.IOException("APK too large"); }
                     if (done >= 0 && state != DownloadManager.STATUS_PENDING) downloaded = (int) (done * 100 / pending.size());
+                    if (state == DownloadManager.STATUS_RUNNING && total == pending.size()) {
+                        runningBytes = done;
+                        runningTotal = total;
+                        sampledAt = SystemClock.elapsedRealtime();
+                    }
                     if (state == DownloadManager.STATUS_SUCCESSFUL) {
                         runOnUiThread(() -> {
                             if (isDestroyed() || request != generation) return;
@@ -276,10 +339,19 @@ public class UpdateActivity extends Activity {
                 }
             } catch (Exception e) { failure = true; result = tr("Проверка обновления не пройдена. Повторите загрузку.", "Update verification failed. Download it again."); }
             String label = result; boolean verified = complete, rejected = failure; AppUpdates.Release selected = pending; int done = downloaded;
+            long bytes = runningBytes, total = runningTotal, now = sampledAt;
             runOnUiThread(() -> { polling = false; if (isDestroyed() || request != generation) return;
                 if (selected != null || !rejected) release = selected;
                 ready = verified; failed = rejected; percent = done;
-                if (verified) verifiedId = id; message = label; update(); });
+                if (verified) verifiedId = id;
+                etaSeconds = resumed ? downloadEta.sample(id, now, bytes, total) : -1;
+                message = label;
+                update();
+                if (openCompletedOffer) {
+                    openCompletedOffer = false;
+                    if (verified && resumed && !isFinishing()) act();
+                }
+            });
         });
     }
     private void error(String label) { runOnUiThread(() -> { if (isDestroyed()) return; busy = false; ready = false; failed = true; message = label; update(); }); }

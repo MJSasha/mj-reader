@@ -21,6 +21,7 @@ final class ReaderIcon extends Drawable {
     }
 
     static ReaderIcon forLabel(Context context, String label, int color) {
+        if (label.equals(context.getString(R.string.rsvp_action))) return new ReaderIcon(context, "speed", color);
         String kind = switch (label) {
             case "Настройки", "Settings", "Настройки RSVP", "RSVP settings", "Профили и настройки", "Profiles & settings" -> "settings";
             case "Все книги", "All books", "Библиотека", "Library" -> "library";

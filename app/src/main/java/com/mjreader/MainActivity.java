@@ -424,18 +424,23 @@ public class MainActivity extends Activity {
         AppUpdates.WORKER.execute(() -> {
             try {
                 AppUpdates.Release update = AppUpdates.check(context);
+                if (update == null) return;
+                Intent offer = UpdateActivity.offer(this, update);
                 runOnUiThread(() -> {
-                    if (isDestroyed() || isFinishing() || current != null || settingsOpen || !hasWindowFocus() || update == null
+                    if (isDestroyed() || isFinishing() || current != null || settingsOpen || !hasWindowFocus()
                             || !AppUpdates.prefs(this).getBoolean("automatic", true)
                             || update.version().equals(AppUpdates.prefs(this).getString("announced", ""))) return;
                     AppUpdates.prefs(this).edit().putString("announced", update.version()).apply();
-                    dialogs().setTitle(tr("Доступно обновление ", "Update available ") + update.version())
-                            .setMessage(tr("Посмотреть изменения и скачать новую версию MJReader?", "View changes and download the new MJReader version?"))
-                            .setNegativeButton(tr("Позже", "Later"), null)
-                            .setPositiveButton(tr("Подробнее", "View update"), (d, w) -> startActivity(new Intent(this, UpdateActivity.class))).show();
+                    showUpdateOffer(update.version(), offer);
                 });
             } catch (Exception ignored) { /* Offline reading never shows an update error. Manual checks can retry. */ }
         });
+    }
+    AlertDialog showUpdateOffer(String version, Intent offer) {
+        return dialogs().setTitle(tr("Доступно обновление ", "Update available ") + version)
+                .setMessage(tr("Android попросит подтвердить установку.", "Android will ask you to confirm installation."))
+                .setNegativeButton(tr("Позже", "Later"), null)
+                .setPositiveButton(tr("Обновить", "Update"), (d, w) -> startActivity(offer)).show();
     }
     private void library() {
         if (startup == null) automaticUpdates();
@@ -682,9 +687,10 @@ public class MainActivity extends Activity {
     private void filterDialog() {
         String[] names = {tr("Все книги", "All books"), tr("Читаю", "Reading"), tr("Хочу прочитать", "Want to read"),
                 tr("Прочитано", "Finished"), tr("Избранное", "Favorites"), tr("Коллекции", "Collections"), tr("Удалённые", "Deleted")};
-        dialogs().setTitle(tr("Показать", "Show")).setItems(names, (dialog, index) -> {
+        String[] filters = {"all", "reading", "want", "done", "favorite", "collection", "trash"};
+        dialogs().setTitle(tr("Показать", "Show")).setItems(names, Arrays.asList(filters).indexOf(filter), (dialog, index) -> {
             if (index == 5) { collectionsDialog(); return; }
-            filter = new String[]{"all", "reading", "want", "done", "favorite", "collection", "trash"}[index];
+            filter = filters[index];
             libraryRow = 0;
             libraryBookIndex = -1; libraryOffset = 0;
             library();
@@ -1241,7 +1247,8 @@ public class MainActivity extends Activity {
         boolean compact = getResources().getConfiguration().screenHeightDp < 400;
         footer = column();
         footer.setPadding(dp(8), compact ? 0 : dp(8), dp(8), compact ? 0 : dp(8));
-        footer.setBackground(compact ? shape(options.surface(), 20) : ReaderNavigation.panel(this, options));
+        footer.setBackground(compact ? shape(options.surface(), 20) : new LayerDrawable(new Drawable[]{
+                new ColorDrawable(options.background()), ReaderNavigation.panel(this, options)}));
         LinearLayout navigation = row();
         previousPageButton = nextPageButton = null;
         if (options.flag("pages", false)) {
@@ -1255,10 +1262,13 @@ public class MainActivity extends Activity {
         counter.setGravity(Gravity.CENTER);
         counter.setMinHeight(dp(48));
         if (compact) { counter.setMaxLines(1); counter.setEllipsize(TextUtils.TruncateAt.END); }
+        else counter.setTextColor(new ColorStateList(new int[][]{{android.R.attr.state_pressed},
+                {android.R.attr.state_hovered}, {}}, new int[]{options.ink(), options.ink(), options.muted()}));
         counter.setContentDescription(tr("Прогресс и переход по книге", "Reading progress and navigation"));
         counter.setOnClickListener(v -> readingNavigation());
         counter.setFocusable(true);
-        counter.setBackground(feedback(shape(compact ? options.surface() : Color.TRANSPARENT, 14)));
+        counter.setBackground(compact ? feedback(shape(options.surface(), 14))
+                : options.tonalFeedback(shape(Color.TRANSPARENT, 14), getResources().getDisplayMetrics().density));
         navigation.addView(counter, new LinearLayout.LayoutParams(0, -2, 1));
         if (options.flag("pages", false)) {
             space(navigation);
@@ -1270,19 +1280,18 @@ public class MainActivity extends Activity {
         footer.addView(navigation);
         if (!compact) {
             LinearLayout tools = row();
-            tools.setBackground(ReaderNavigation.panel(this, options));
-            Button chapters = ReaderNavigation.item(this, options, tr("Оглавление", "Contents"), "list", false, this::contents);
+            Button chapters = ReaderNavigation.readingItem(this, options, tr("Оглавление", "Contents"), "list", this::contents);
             tools.addView(chapters, weight());
             space(tools);
-            Button bookmark = ReaderNavigation.item(this, options, tr("Добавить закладку", "Add bookmark"), "bookmark", false, this::addBookmark);
+            Button bookmark = ReaderNavigation.readingItem(this, options, tr("Добавить закладку", "Add bookmark"), "bookmark", this::addBookmark);
             tools.addView(bookmark, weight());
             space(tools);
-            Button theme = ReaderNavigation.item(this, options, tr("Сменить тему: день / ночь", "Change theme: day / night"), "sun", false, () -> {
+            Button theme = ReaderNavigation.readingItem(this, options, tr("Сменить тему: день / ночь", "Change theme: day / night"), "sun", () -> {
                 options.put("theme", options.light() ? 0 : 2); changedOptions();
             });
             tools.addView(theme, weight());
             space(tools);
-            Button rsvp = ReaderNavigation.item(this, options, getString(R.string.rsvp_action), "speed", false, () -> { focus = true; reader(); });
+            Button rsvp = ReaderNavigation.readingItem(this, options, getString(R.string.rsvp_action), "speed", () -> { focus = true; reader(); });
             tools.addView(rsvp, weight());
             footer.addView(tools);
         }

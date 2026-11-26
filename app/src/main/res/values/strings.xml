@@ -20,4 +20,5 @@
     <string name="restart">Read again</string>
     <string name="speed">Speed, words/min</string>
     <string name="book_progress">Reading position</string>
+    <string name="update_time_remaining">About %1$s remaining</string>
 </resources>

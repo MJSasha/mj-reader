@@ -98,6 +98,8 @@ launching the same showcase run, then restore the emulator size.
 Review images before committing. The full `dist/` history and personal-book captures
 are intentionally excluded from Git.
 
+Add `-e readerPanel true` to the showcase command on the phone emulator to capture idle, mouse hover, keyboard focus and touch press for the reader actions and light navigation. The run cancels pointer presses after capture.
+
 ## Test certificate
 
 `app/src/androidTest/assets/catalog-test.p12` is a public, localhost-only fixture with
@@ -107,4 +109,4 @@ Release packaging explicitly rejects `.p12`, signing files and EPUB files in the
 
 ## Optional installer check
 
-The `updates` instrumentation accepts `-e updateApk /data/local/tmp/mjreader-update-test.apk` for a locally generated APK with versionName `99.0.0`, a higher versionCode, package `com.mjreader`, `debuggable=false` and the same debug certificate as the installed debug app. This optional check validates an actual APK and opens the permission explanation (or Android installer when the dedicated emulator already permits it); it never confirms installation. Do not use a production library/device. Require the runner's `PASS:` marker. The portable `updates` suite does not need this file or GitHub access.
+The `updates` instrumentation accepts `-e updateApk /data/local/tmp/mjreader-update-test.apk` for a locally generated APK with versionName `99.0.0`, a higher versionCode, package `com.mjreader`, `debuggable=false` and the same debug certificate as the installed debug app. Run this optional check with the dedicated emulator offline. It confirms that accepting an offer starts one DownloadManager transfer and that a matching, completed APK opens the permission explanation or Android installer. The test stops before confirming installation. Require the runner's `PASS:` marker. The portable `updates` suite does not need this file or GitHub access.

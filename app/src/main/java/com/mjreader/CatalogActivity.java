@@ -337,9 +337,10 @@ public class CatalogActivity extends Activity {
         for (Button choice : new Button[]{byTitle, byAuthor}) {
             boolean selected = (choice == byAuthor) == author;
             choice.setSelected(selected);
-            choice.setTextColor(selected ? theme.onSelection() : theme.ink());
-            choice.setBackground(theme.feedback(shape(selected ? theme.selection() : theme.surface(), 16),
-                    getResources().getDisplayMetrics().density));
+            choice.setTextColor(selected ? theme.accent() : theme.ink());
+            GradientDrawable shape = shape(selected ? theme.selection() : theme.surface(), 16);
+            if (selected) shape.setStroke(dp(1), theme.outline());
+            choice.setBackground(theme.feedback(shape, getResources().getDisplayMetrics().density));
         }
     }
     private void clearSearch() {
@@ -715,7 +716,12 @@ public class CatalogActivity extends Activity {
         Button button = new Button(this); button.setText(label); button.setTextSize(14); button.setAllCaps(false); button.setMinHeight(dp(48)); button.setMinimumHeight(dp(48)); button.setMinWidth(0); button.setMinimumWidth(0); button.setPadding(dp(12), dp(10), dp(12), dp(10));
         int ink = accent ? theme.onAccent() : theme.ink(); button.setTextColor(ink); button.setStateListAnimator(null);
         button.setBackground(theme.feedback(shape(accent ? theme.accent() : theme.surface(), 16), getResources().getDisplayMetrics().density));
-        button.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, icon, ink), null, null, null); button.setCompoundDrawablePadding(dp(8)); button.setOnClickListener(v -> action.run()); return button;
+        if (!icon.isEmpty()) {
+            button.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, icon, ink), null, null, null);
+            button.setCompoundDrawablePadding(dp(8));
+            if (!label.isEmpty()) button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        }
+        button.setOnClickListener(v -> action.run()); return button;
     }
     private EditText field(String value, String hint) { EditText view = new EditText(this); view.setSingleLine(); view.setImeOptions(EditorInfo.IME_FLAG_NO_EXTRACT_UI); view.setText(value); view.setHint(hint); view.setContentDescription(hint); view.setTextSize(16); view.setTextColor(theme.ink()); view.setHintTextColor(theme.muted()); view.setPadding(dp(14), dp(12), dp(14), dp(12)); view.setMinHeight(dp(52)); view.setBackground(theme.feedback(shape(theme.surface(), 16), getResources().getDisplayMetrics().density)); return view; }
     private LinearLayout takeHeader() {
