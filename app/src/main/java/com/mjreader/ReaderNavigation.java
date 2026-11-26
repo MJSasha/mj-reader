@@ -35,7 +35,7 @@ final class ReaderNavigation {
         dock.setOrientation(LinearLayout.HORIZONTAL);
         dock.setBackground(shape(context, theme.navigationSurface(), 20));
         for (Tab tab : tabs) {
-            Button button = item(context, theme, context.getString(tab.title), tab.icon, tab == selected, () -> navigate.accept(tab));
+            Button button = item(context, theme, context.getString(tab.title), tab.icon, tab == selected, false, () -> navigate.accept(tab));
             button.setTag(tab);
             LinearLayout.LayoutParams itemParams = new LinearLayout.LayoutParams(0, dp(context, 48), 1);
             if (tab != tabs[0]) itemParams.setMarginStart(dp(context, 8));
@@ -55,20 +55,26 @@ final class ReaderNavigation {
         return shape;
     }
 
-    static Button item(Context context, ReaderOptions theme, String title, String icon, boolean selected, Runnable click) {
+    static Button readingItem(Context context, ReaderOptions theme, String title, String icon, Runnable click) {
+        return item(context, theme, title, icon, false, true, click);
+    }
+
+    private static Button item(Context context, ReaderOptions theme, String title, String icon, boolean selected, boolean reading, Runnable click) {
         Button button = new Button(context);
         button.setContentDescription(title);
         button.setTooltipText(title);
         button.setMinWidth(dp(context, 48)); button.setMinimumWidth(dp(context, 48));
         button.setMinHeight(dp(context, 48)); button.setMinimumHeight(dp(context, 48));
         button.setStateListAnimator(null);
+        boolean localFeedback = reading || theme.light();
+        if (localFeedback) button.setDefaultFocusHighlightEnabled(false);
         button.setSelected(selected);
         float density = context.getResources().getDisplayMetrics().density;
         boolean vivid = selected && theme.vividSelection();
         var fill = vivid ? theme.vividSelection(density, 16)
                 : shape(context, selected ? theme.selection() : Color.TRANSPARENT, 16);
         var indicator = new LayerDrawable(new Drawable[]{
-                theme.feedback(fill, density),
+                localFeedback ? theme.iconFeedback(fill, density) : theme.feedback(fill, density),
                 new ReaderIcon(context, icon, vivid ? 0xFFFFC2F7 : selected ? theme.onSelection() : theme.muted())});
         indicator.setLayerInset(0, dp(context, 2), dp(context, 3), dp(context, 2), dp(context, 3));
         indicator.setLayerSize(1, dp(context, 24), dp(context, 24));

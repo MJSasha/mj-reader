@@ -98,6 +98,8 @@ launching the same showcase run, then restore the emulator size.
 Review images before committing. The full `dist/` history and personal-book captures
 are intentionally excluded from Git.
 
+Add `-e readerPanel true` to the showcase command on the phone emulator to capture idle, mouse hover, keyboard focus and touch press for the reader actions and light navigation. The run cancels pointer presses after capture.
+
 ## Test certificate
 
 `app/src/androidTest/assets/catalog-test.p12` is a public, localhost-only fixture with

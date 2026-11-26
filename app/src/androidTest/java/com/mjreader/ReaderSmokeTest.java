@@ -19,10 +19,12 @@ public class ReaderSmokeTest extends Instrumentation {
     private volatile boolean watchStartup;
     private volatile java.util.concurrent.CountDownLatch holdLibrary;
     private android.animation.ValueAnimator startupReveal;
+    private boolean captureReaderPanel;
     private boolean updatesOnly, visualOnly, sampleOnly, readerOnly, benchmarkOnly, catalogOnly, liveCatalog, adaptiveOnly, motionOnly, showcaseOnly;
     @Override public void onCreate(Bundle arguments) {
         super.onCreate(arguments);
         showcaseOnly = arguments != null && arguments.getString("showcase", "false").equals("true");
+        captureReaderPanel = arguments != null && arguments.getString("readerPanel", "false").equals("true");
         motionOnly = arguments != null && arguments.getString("motion", "false").equals("true");
         adaptiveOnly = arguments != null && arguments.getString("adaptive", "false").equals("true");
         catalogOnly = arguments != null && arguments.getString("catalog", "false").equals("true");
@@ -965,6 +967,12 @@ public class ReaderSmokeTest extends Instrumentation {
             waitForIdleSync(); capture("showcase-library-dark");
             runOnMainSync(() -> { ((ReaderOptions) field(screen, "options")).put("theme", 2); invoke(screen, "changedOptions"); invoke(screen, "library"); });
             waitForIdleSync(); capture("showcase-library-light");
+            if (captureReaderPanel) {
+                LinearLayout root = (LinearLayout) field(screen, "root");
+                panelStates((LinearLayout) root.findViewWithTag(ReaderNavigation.TAG), 0, 1, "navigation-light",
+                        "library", "search", "downloads", "settings");
+                panelStates((LinearLayout) root.getChildAt(0), 1, 1, "standard-light", "add");
+            }
             runOnMainSync(() -> invoke(screen, "open", new Class[]{Books.Book.class, boolean.class}, demo.get(0), false));
             awaitPages(screen); waitForIdleSync();
             TextView duplicate = ((View) field(screen, "header")).findViewWithTag("reader-book-title");
@@ -977,6 +985,12 @@ public class ReaderSmokeTest extends Instrumentation {
                 invoke(screen, "jump", new Class[]{int.class}, 0);
             });
             awaitField(screen, "body"); waitForIdleSync(); capture("showcase-reading-dark");
+            if (captureReaderPanel) {
+                readerPanelStates(screen, "dark");
+                runOnMainSync(() -> { ((ReaderOptions) field(screen, "options")).put("theme", 2); invoke(screen, "changedOptions"); });
+                awaitField(screen, "body"); waitForIdleSync();
+                readerPanelStates(screen, "light");
+            }
             runOnMainSync(() -> { ReaderOptions options = (ReaderOptions) field(screen, "options"); options.put("theme", 3); invoke(screen, "changedOptions"); invoke(screen, "jump", new Class[]{int.class}, 0); });
             waitForIdleSync(); capture("showcase-reading");
             runOnMainSync(() -> { ((ReaderOptions) field(screen, "options")).put("theme", 0); invoke(screen, "changedOptions"); setField(screen, "focus", true); invoke(screen, "reader"); });
@@ -989,6 +1003,49 @@ public class ReaderSmokeTest extends Instrumentation {
             for (String key : prefs.getAll().keySet()) if (key.contains("showcase-")) editor.remove(key);
             editor.apply();
         }
+    }
+    private void readerPanelStates(MainActivity screen, String theme) throws Exception {
+        LinearLayout footer = (LinearLayout) field(screen, "footer");
+        panelStates((LinearLayout) footer.getChildAt(1), 0, 2, "reader-panel-" + theme,
+                "contents", "bookmark", "theme", "rsvp");
+    }
+    private void panelStates(LinearLayout tools, int first, int stride, String prefix, String... actions) throws Exception {
+        setInTouchMode(true);
+        capture(prefix + "-idle");
+        for (int index = 0; index < actions.length; index++) {
+            View button = tools.getChildAt(first + index * stride);
+            int[] point = new int[2];
+            runOnMainSync(() -> {
+                button.getLocationOnScreen(point);
+                point[0] += button.getWidth() / 2;
+                point[1] += button.getHeight() / 2;
+            });
+            String name = prefix + "-" + actions[index];
+            long now = android.os.SystemClock.uptimeMillis();
+            panelPointer(now, MotionEvent.ACTION_HOVER_MOVE, point[0], point[1], InputDevice.SOURCE_MOUSE);
+            runOnMainSync(() -> { if (!button.isHovered()) throw new AssertionError("Hover did not reach " + name); });
+            capture(name + "-hover");
+            int away = point[1] < 110 ? point[1] + 110 : point[1] - 110;
+            panelPointer(now, MotionEvent.ACTION_HOVER_MOVE, point[0], away, InputDevice.SOURCE_MOUSE);
+            now = android.os.SystemClock.uptimeMillis();
+            panelPointer(now, MotionEvent.ACTION_DOWN, point[0], point[1], InputDevice.SOURCE_TOUCHSCREEN);
+            android.os.SystemClock.sleep(ViewConfiguration.getTapTimeout() + 30);
+            runOnMainSync(() -> { if (!button.isPressed()) throw new AssertionError("Press did not reach " + name); });
+            capture(name + "-pressed");
+            panelPointer(now, MotionEvent.ACTION_CANCEL, point[0], point[1], InputDevice.SOURCE_TOUCHSCREEN);
+            sendKeyDownUpSync(KeyEvent.KEYCODE_TAB);
+            waitForIdleSync();
+            runOnMainSync(() -> { if (!button.requestFocus()) throw new AssertionError("Could not focus " + name); });
+            capture(name + "-focus");
+            setInTouchMode(true);
+        }
+    }
+    private void panelPointer(long down, int action, int x, int y, int source) {
+        MotionEvent event = MotionEvent.obtain(down, android.os.SystemClock.uptimeMillis(), action, x, y, 0);
+        event.setSource(source);
+        try {
+            if (!getUiAutomation().injectInputEvent(event, true)) throw new AssertionError("Reader panel input injection failed");
+        } finally { event.recycle(); }
     }
     private void narrowScreenCheck() throws Exception {
         Context context = getTargetContext(); var prefs = context.getSharedPreferences("reader", 0);

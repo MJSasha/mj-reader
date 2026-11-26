@@ -91,17 +91,36 @@ final class ReaderOptions {
         return background;
     }
     android.graphics.drawable.Drawable feedback(android.graphics.drawable.GradientDrawable normal, float density) {
-        android.graphics.drawable.GradientDrawable pressed = (android.graphics.drawable.GradientDrawable) normal.getConstantState().newDrawable().mutate();
         int base = normal.getColor() == null ? surfaceHigh() : normal.getColor().getDefaultColor();
         int overlay = light() ? 0 : 255;
-        pressed.setColor(android.graphics.Color.rgb(
+        int active = Color.rgb(
                 (int) (android.graphics.Color.red(base) * .88f + overlay * .12f),
                 (int) (android.graphics.Color.green(base) * .88f + overlay * .12f),
-                (int) (android.graphics.Color.blue(base) * .88f + overlay * .12f)));
+                (int) (android.graphics.Color.blue(base) * .88f + overlay * .12f));
+        return feedback(normal, density, base, active, active);
+    }
+    android.graphics.drawable.Drawable iconFeedback(android.graphics.drawable.GradientDrawable normal, float density) {
+        int base = normal.getColor().getDefaultColor();
+        int tint = light() ? accent() : ink();
+        return feedback(normal, density, base, iconTint(base, tint, light() ? 64 : 46),
+                iconTint(base, tint, light() ? 40 : 24));
+    }
+    private static int iconTint(int base, int tint, int opacity) {
+        if (base == Color.TRANSPARENT) return (tint & 0x00FFFFFF) | (opacity << 24);
+        return Color.rgb(
+                (Color.red(base) * (255 - opacity) + Color.red(tint) * opacity) / 255,
+                (Color.green(base) * (255 - opacity) + Color.green(tint) * opacity) / 255,
+                (Color.blue(base) * (255 - opacity) + Color.blue(tint) * opacity) / 255);
+    }
+    private android.graphics.drawable.Drawable feedback(android.graphics.drawable.GradientDrawable normal, float density,
+                                                       int base, int pressedColor, int hoveredColor) {
+        android.graphics.drawable.GradientDrawable pressed = (android.graphics.drawable.GradientDrawable) normal.getConstantState().newDrawable().mutate();
+        pressed.setColor(pressedColor);
         android.graphics.drawable.GradientDrawable focused = (android.graphics.drawable.GradientDrawable) normal.getConstantState().newDrawable().mutate();
         // Primary buttons need a contrasting ring too: accent-on-accent is invisible.
         focused.setStroke(Math.round(2 * density), base == accent() ? onAccent() : accent());
         android.graphics.drawable.GradientDrawable hovered = (android.graphics.drawable.GradientDrawable) pressed.getConstantState().newDrawable().mutate();
+        hovered.setColor(hoveredColor);
         android.graphics.drawable.GradientDrawable disabled = (android.graphics.drawable.GradientDrawable) normal.getConstantState().newDrawable().mutate();
         disabled.setAlpha(100);
         android.graphics.drawable.StateListDrawable states = new android.graphics.drawable.StateListDrawable();

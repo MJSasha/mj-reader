@@ -1241,7 +1241,8 @@ public class MainActivity extends Activity {
         boolean compact = getResources().getConfiguration().screenHeightDp < 400;
         footer = column();
         footer.setPadding(dp(8), compact ? 0 : dp(8), dp(8), compact ? 0 : dp(8));
-        footer.setBackground(compact ? shape(options.surface(), 20) : ReaderNavigation.panel(this, options));
+        footer.setBackground(compact ? shape(options.surface(), 20) : new LayerDrawable(new Drawable[]{
+                new ColorDrawable(options.background()), ReaderNavigation.panel(this, options)}));
         LinearLayout navigation = row();
         previousPageButton = nextPageButton = null;
         if (options.flag("pages", false)) {
@@ -1270,19 +1271,18 @@ public class MainActivity extends Activity {
         footer.addView(navigation);
         if (!compact) {
             LinearLayout tools = row();
-            tools.setBackground(ReaderNavigation.panel(this, options));
-            Button chapters = ReaderNavigation.item(this, options, tr("Оглавление", "Contents"), "list", false, this::contents);
+            Button chapters = ReaderNavigation.readingItem(this, options, tr("Оглавление", "Contents"), "list", this::contents);
             tools.addView(chapters, weight());
             space(tools);
-            Button bookmark = ReaderNavigation.item(this, options, tr("Добавить закладку", "Add bookmark"), "bookmark", false, this::addBookmark);
+            Button bookmark = ReaderNavigation.readingItem(this, options, tr("Добавить закладку", "Add bookmark"), "bookmark", this::addBookmark);
             tools.addView(bookmark, weight());
             space(tools);
-            Button theme = ReaderNavigation.item(this, options, tr("Сменить тему: день / ночь", "Change theme: day / night"), "sun", false, () -> {
+            Button theme = ReaderNavigation.readingItem(this, options, tr("Сменить тему: день / ночь", "Change theme: day / night"), "sun", () -> {
                 options.put("theme", options.light() ? 0 : 2); changedOptions();
             });
             tools.addView(theme, weight());
             space(tools);
-            Button rsvp = ReaderNavigation.item(this, options, getString(R.string.rsvp_action), "speed", false, () -> { focus = true; reader(); });
+            Button rsvp = ReaderNavigation.readingItem(this, options, getString(R.string.rsvp_action), "speed", () -> { focus = true; reader(); });
             tools.addView(rsvp, weight());
             footer.addView(tools);
         }
