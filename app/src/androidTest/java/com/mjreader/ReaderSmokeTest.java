@@ -1205,7 +1205,7 @@ public class ReaderSmokeTest extends Instrumentation {
             StartupBanner early = new StartupBanner(context);
             boolean[] complete = {false};
             android.animation.ValueAnimator entrance = (android.animation.ValueAnimator) field(early, "entrance");
-            if (entrance.getDuration() != 520) throw new AssertionError("Startup entrance must keep the prior reading tempo");
+            if (entrance.getDuration() != 700) throw new AssertionError("The light orbit must play once for 700 ms");
             if (find(early, "MJ Reader") == null || find(early, context.getString(R.string.loading_books)) != null)
                 throw new AssertionError("Splash must show the MJ Reader wordmark without a loading caption");
             entrance.start();
@@ -1215,7 +1215,7 @@ public class ReaderSmokeTest extends Instrumentation {
             entrance.end();
             if (!(field(early, "reveal") instanceof android.animation.ValueAnimator reveal))
                 throw new AssertionError("Finished entrance must reveal a ready library");
-            if (reveal.getDuration() != 420) throw new AssertionError("The library reveal must keep the prior reading tempo");
+            if (reveal.getDuration() != 400) throw new AssertionError("The library light reveal must take 400 ms");
             reveal.end();
             if (!complete[0]) throw new AssertionError("Startup never completed");
             for (int theme = 0; theme < 4; theme++) {
@@ -1251,6 +1251,7 @@ public class ReaderSmokeTest extends Instrumentation {
                     if (banner.getAlpha() <= 0f || banner.getAlpha() >= 1f
                             || field(banner, "entrance") != null
                             || banner.getChildAt(0).getAlpha() != 0f || banner.getChildAt(1).getAlpha() != 0f
+                            || banner.getChildAt(0).getScaleX() <= 1f || banner.getChildAt(0).getScaleX() > 1.08f
                             || library.getParent() != banner.getParent() || library.getAlpha() != 1f || library.getScaleX() != 1f
                             || library.getImportantForAccessibility() != View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS)
                         throw new AssertionError("Startup must reveal the positioned library beneath the fading splash");

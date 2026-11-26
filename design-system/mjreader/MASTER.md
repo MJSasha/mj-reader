@@ -86,8 +86,12 @@ Compact chapter header; quick appearance behind the type icon. Footer has contex
   and wordmark stay fixed while the gradient corner shapes shift. The startup identity fades out before the
   stationary library and its masthead become visible.
 
-## Startup tempo and bottom panels, 0.9.3
+## Light-orbit launch and bottom panels, 0.9.3
 
-- The pages assemble for 520 ms after the system splash. The library reveal takes 420 ms.
+- The system splash fades into two thin lavender and pink arcs on matching graphite. The arcs and small
+  particles converge once as the two pages meet at the spine. The assembled mark settles by 700 ms.
+- A 400 ms diagonal light pass and 8% emblem approach reveal the ready library. Its masthead appears
+  after the centered identity fades. Use the existing loading indicator if the library is still busy.
+- Authoring comparisons use continuous Android recordings of signed 0.9.0 and the light-orbit build.
 - The navigation dock and text-reader footer use the larger of the system bottom inset and 8 dp.
   This leaves space when the gesture indicator is hidden and uses the system spacing when it is shown.
