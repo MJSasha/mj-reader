@@ -12,6 +12,7 @@ import android.widget.*;
 
 /** Downloads persist in Android's DownloadManager across navigation and process death. */
 public class UpdateActivity extends Activity {
+    private static final String EXTRA_OFFER = "com.mjreader.UPDATE_OFFER";
     private ReaderOptions theme;
     private TextView status, available, details;
     private ScrollView page;
@@ -21,6 +22,7 @@ public class UpdateActivity extends Activity {
     private AppUpdates.Release release;
     private String message = "";
     private boolean busy, checking, polling, resumed, ready, failed;
+    private boolean openCompletedOffer;
     private int percent = -1;
     private int generation;
     private long verifiedId = -1;
@@ -35,6 +37,9 @@ public class UpdateActivity extends Activity {
     private final Runnable refresh = new Runnable() {
         @Override public void run() { poll(); if (resumed) handler.postDelayed(this, 1000); }
     };
+    static Intent offer(Context context, AppUpdates.Release release) throws org.json.JSONException {
+        return new Intent(context, UpdateActivity.class).putExtra(EXTRA_OFFER, release.json().toString());
+    }
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         theme = ReaderOptions.load(getSharedPreferences("reader", 0), null);
@@ -43,6 +48,15 @@ public class UpdateActivity extends Activity {
         message = release == null ? tr("Проверьте, доступна ли новая версия.", "Check for a new version.") : tr("Доступно обновление", "Update available");
         render();
         AppUpdates.prefs(this).registerOnSharedPreferenceChangeListener(changed);
+        if (state == null && getIntent().hasExtra(EXTRA_OFFER)) {
+            AppUpdates.Release offered;
+            try { offered = AppUpdates.decode(getIntent().getStringExtra(EXTRA_OFFER)); }
+            catch (Exception ignored) { return; }
+            if (AppUpdates.compare(offered.version(), AppUpdates.version(this)) > 0) {
+                release = offered;
+                act(true);
+            }
+        }
     }
     @Override protected void onResume() { super.onResume(); resumed = true; handler.post(refresh); }
     @Override protected void onPause() { resumed = false; handler.removeCallbacks(refresh); super.onPause(); }
@@ -215,7 +229,8 @@ public class UpdateActivity extends Activity {
             }
         });
     }
-    private void act() {
+    private void act() { act(false); }
+    private void act(boolean fromOffer) {
         if (release == null || busy) return;
         AppUpdates.Release selected = release; busy = true; generation++; update();
         Context context = getApplicationContext(); boolean installing = ready;
@@ -225,14 +240,29 @@ public class UpdateActivity extends Activity {
                     AppUpdates.verify(context, selected);
                     Uri uri = context.getSystemService(DownloadManager.class).getUriForDownloadedFile(downloadId());
                     if (uri == null) throw new java.io.IOException("Missing download");
-                    runOnUiThread(() -> { if (isDestroyed()) return; busy = false; update(); install(uri); });
+                    runOnUiThread(() -> {
+                        if (isDestroyed() || isFinishing()) return;
+                        busy = false; update();
+                        if (resumed) install(uri);
+                    });
                 } else {
-                    AppUpdates.download(context, selected);
+                    boolean existing = fromOffer && matchingDownload(context, selected);
+                    if (!existing) AppUpdates.download(context, selected);
                     runOnUiThread(() -> { if (isDestroyed()) return; busy = false; failed = false; verifiedId = -1; percent = -1;
+                        openCompletedOffer = existing;
                         message = tr("Загрузка… Можно вернуться к чтению.", "Downloading… You can return to reading."); update(); poll(); });
                 }
             } catch (Exception e) { error(tr("Не удалось подготовить обновление. Повторите загрузку.", "Could not prepare the update. Download it again.")); }
         });
+    }
+    private static boolean matchingDownload(Context context, AppUpdates.Release offered) {
+        SharedPreferences prefs = AppUpdates.prefs(context);
+        if (prefs.getLong("download", -1) < 0) return false;
+        try {
+            AppUpdates.Release pending = AppUpdates.decode(prefs.getString("pending", ""));
+            return offered.version().equals(pending.version()) && offered.sha256().equals(pending.sha256())
+                    && offered.size() == pending.size();
+        } catch (Exception ignored) { return false; }
     }
     private void install(Uri uri) {
         if (!getPackageManager().canRequestPackageInstalls()) {
@@ -279,7 +309,12 @@ public class UpdateActivity extends Activity {
             runOnUiThread(() -> { polling = false; if (isDestroyed() || request != generation) return;
                 if (selected != null || !rejected) release = selected;
                 ready = verified; failed = rejected; percent = done;
-                if (verified) verifiedId = id; message = label; update(); });
+                if (verified) verifiedId = id; message = label; update();
+                if (openCompletedOffer) {
+                    openCompletedOffer = false;
+                    if (verified && resumed && !isFinishing()) act();
+                }
+            });
         });
     }
     private void error(String label) { runOnUiThread(() -> { if (isDestroyed()) return; busy = false; ready = false; failed = true; message = label; update(); }); }

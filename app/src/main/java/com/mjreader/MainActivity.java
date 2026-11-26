@@ -424,18 +424,23 @@ public class MainActivity extends Activity {
         AppUpdates.WORKER.execute(() -> {
             try {
                 AppUpdates.Release update = AppUpdates.check(context);
+                if (update == null) return;
+                Intent offer = UpdateActivity.offer(this, update);
                 runOnUiThread(() -> {
-                    if (isDestroyed() || isFinishing() || current != null || settingsOpen || !hasWindowFocus() || update == null
+                    if (isDestroyed() || isFinishing() || current != null || settingsOpen || !hasWindowFocus()
                             || !AppUpdates.prefs(this).getBoolean("automatic", true)
                             || update.version().equals(AppUpdates.prefs(this).getString("announced", ""))) return;
                     AppUpdates.prefs(this).edit().putString("announced", update.version()).apply();
-                    dialogs().setTitle(tr("Доступно обновление ", "Update available ") + update.version())
-                            .setMessage(tr("Посмотреть изменения и скачать новую версию MJReader?", "View changes and download the new MJReader version?"))
-                            .setNegativeButton(tr("Позже", "Later"), null)
-                            .setPositiveButton(tr("Подробнее", "View update"), (d, w) -> startActivity(new Intent(this, UpdateActivity.class))).show();
+                    showUpdateOffer(update.version(), offer);
                 });
             } catch (Exception ignored) { /* Offline reading never shows an update error. Manual checks can retry. */ }
         });
+    }
+    AlertDialog showUpdateOffer(String version, Intent offer) {
+        return dialogs().setTitle(tr("Доступно обновление ", "Update available ") + version)
+                .setMessage(tr("Android попросит подтвердить установку.", "Android will ask you to confirm installation."))
+                .setNegativeButton(tr("Позже", "Later"), null)
+                .setPositiveButton(tr("Обновить", "Update"), (d, w) -> startActivity(offer)).show();
     }
     private void library() {
         if (startup == null) automaticUpdates();
