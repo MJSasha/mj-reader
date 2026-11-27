@@ -1363,7 +1363,7 @@ public class ReaderSmokeTest extends Instrumentation {
                     throw new AssertionError("Tab entrance must animate only the incoming content");
                 dock.findViewWithTag(ReaderNavigation.Tab.LIBRARY).performClick();
                 View library = (View) field(activity, "root");
-                if (library.findViewWithTag(ReaderNavigation.Tab.LIBRARY).isSelected() == false)
+                if (!library.findViewWithTag(ReaderNavigation.Tab.LIBRARY).isSelected())
                     throw new AssertionError("A rapid tab switch left the wrong destination selected");
             });
         } finally { runOnMainSync(activity::finish); }
@@ -1636,6 +1636,12 @@ public class ReaderSmokeTest extends Instrumentation {
         int anchor = (int) field(activity, "anchor");
         int[] viewport = readingViewport(activity);
         runOnMainSync(() -> {
+            View header = (View) field(activity, "header"), footer = (View) field(activity, "footer");
+            int[] top = new int[2], bottom = new int[2];
+            header.getLocationOnScreen(top);
+            footer.getLocationOnScreen(bottom);
+            if (viewport[1] < top[1] + header.getHeight() || viewport[1] + viewport[3] > bottom[1])
+                throw new AssertionError("The controls cover text inside the reading viewport");
             invoke(activity, "setFullscreen", new Class[]{boolean.class}, true);
             if (field(activity, "controlsAnimation") == null)
                 throw new AssertionError("Center toggle should animate controls");

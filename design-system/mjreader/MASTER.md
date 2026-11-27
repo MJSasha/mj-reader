@@ -102,4 +102,4 @@ Compact chapter header; quick appearance behind the type icon. Footer has contex
 
 - Follow MJWatch's short content entrance on explicit tab and settings-section changes, with an 8 dp offset and 240 ms settle. Keep the masthead, bottom dock and window stationary. Data refresh, resize and reduced motion skip the entrance.
 - Top-level destinations share the same masthead minimum height and dock width. The dock hides while the keyboard is visible, and the scrolling viewport ends at the keyboard.
-- On two-page spreads, the central rule stays fixed as the text slides. When a slide is in progress, retain the latest page-turn request and apply it at the next page boundary. Keep header and progress height stable across page turns.
+- On two-page spreads, the central rule stays fixed as the text slides. When a slide is in progress, retain the latest page-turn request and apply it at the next page boundary. Reserve room for both reader panels outside the fixed text viewport, including while they are hidden. Keep header and progress height stable across page turns.

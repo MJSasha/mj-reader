@@ -1162,22 +1162,8 @@ public class MainActivity extends Activity {
         if (!compact) gap(header, 8);
         updateChapterLabel();
         root.addView(header);
-        if (focus) focusScreen(); else {
-            textScreen();
-            // The book keeps one viewport. Controls overlay it instead of changing pagination.
-            View content = pageReader != null ? pageReader : textScroll;
-            root.removeView(header); root.removeView(content); root.removeView(footer);
-            FrameLayout stage = new FrameLayout(this);
-            stage.addView(content, new FrameLayout.LayoutParams(-1, -1));
-            header.setBackgroundColor(options.background());
-            for (View panel : new View[]{header, footer}) {
-                panel.setClickable(true);
-                panel.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            }
-            stage.addView(header, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
-            stage.addView(footer, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
-            root.addView(stage, new LinearLayout.LayoutParams(-1, 0, 1));
-        }
+        // INVISIBLE panels keep their space in the column during fullscreen.
+        if (focus) focusScreen(); else textScreen();
         setFullscreen(fullscreen);
     }
     // LineBreaker constants are inlined; the TextView setters exist since API 26.
