@@ -359,11 +359,11 @@ public class MainActivity extends Activity {
             int gutter = Math.max(width >= 600 ? 24 : 16, (width - limit) / 2);
             boolean reader = current != null && !settingsOpen;
             int bottom = reader ? insets.getStableInsetBottom() : insets.getSystemWindowInsetBottom();
-            boolean floatingPanel = (reader && !focus) || view.findViewWithTag(ReaderNavigation.TAG) != null;
+            boolean navigationDock = view.findViewWithTag(ReaderNavigation.TAG) != null;
             view.setPadding(dp(gutter) + (reader ? insets.getStableInsetLeft() : insets.getSystemWindowInsetLeft()),
                     dp(8) + (reader ? insets.getStableInsetTop() : insets.getSystemWindowInsetTop()),
                     dp(gutter) + (reader ? insets.getStableInsetRight() : insets.getSystemWindowInsetRight()),
-                    floatingPanel ? ReaderNavigation.bottomPadding(this, bottom) : dp(8) + bottom);
+                    navigationDock ? 0 : reader && !focus ? ReaderNavigation.bottomPadding(this, bottom) : dp(8) + bottom);
             ReaderNavigation.updateInsets(view, insets);
             return insets;
         });
@@ -551,7 +551,9 @@ public class MainActivity extends Activity {
         libraryList.addHeaderView(libraryHeader, null, false);
         adapter = new BookAdapter();
         libraryList.setAdapter(adapter);
-        root.addView(libraryList, new LinearLayout.LayoutParams(-1, 0, 1));
+        LinearLayout body = column();
+        body.addView(libraryList, new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
         librarySearch.addTextChangedListener(watcher(() -> {
             query = librarySearch.getText().toString();
             updateResumeVisibility();
@@ -579,9 +581,9 @@ public class MainActivity extends Activity {
             space(status);
             importStatus = label(tr("Обрабатываем файлы…", "Processing files…"), 14, options.muted());
             status.addView(importStatus, weight());
-            root.addView(status, matchWrap()); gap(root, 8);
+            body.addView(status, matchWrap()); gap(body, 8);
         }
-        ReaderNavigation.add(root, options, ReaderNavigation.Tab.LIBRARY, this::navigate);
+        ReaderNavigation.add(root, body, importing ? body : libraryList, options, ReaderNavigation.Tab.LIBRARY, this::navigate);
     }
     private void navigate(ReaderNavigation.Tab tab) {
         switch (tab) {
@@ -1247,8 +1249,7 @@ public class MainActivity extends Activity {
         boolean compact = getResources().getConfiguration().screenHeightDp < 400;
         footer = column();
         footer.setPadding(dp(8), compact ? 0 : dp(8), dp(8), compact ? 0 : dp(8));
-        footer.setBackground(compact ? shape(options.surface(), 20) : new LayerDrawable(new Drawable[]{
-                new ColorDrawable(options.background()), ReaderNavigation.panel(this, options)}));
+        footer.setBackground(compact ? shape(options.surface(), 20) : ReaderNavigation.panel(this, options));
         LinearLayout navigation = row();
         previousPageButton = nextPageButton = null;
         if (options.flag("pages", false)) {
@@ -1928,7 +1929,7 @@ public class MainActivity extends Activity {
                 })));
         settingsDivider(application);
         application.addView(updateSettingsAction());
-        ReaderNavigation.add(root, options, ReaderNavigation.Tab.SETTINGS, this::navigate);
+        ReaderNavigation.add(root, settingsScroll, settingsScroll, options, ReaderNavigation.Tab.SETTINGS, this::navigate);
         restoreSettingsScroll();
     }
     private void openSettingsSection(Runnable open) {

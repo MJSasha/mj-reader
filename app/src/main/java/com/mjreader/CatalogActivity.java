@@ -164,8 +164,7 @@ public class CatalogActivity extends Activity {
         root.setOnApplyWindowInsetsListener((v, insets) -> { int width = getResources().getConfiguration().screenWidthDp;
             int gutter = Math.max(width >= 600 ? 24 : 16, (width - 1040) / 2);
             v.setPadding(dp(gutter) + insets.getSystemWindowInsetLeft(), dp(8) + insets.getSystemWindowInsetTop(),
-                    dp(gutter) + insets.getSystemWindowInsetRight(),
-                    ReaderNavigation.bottomPadding(this, insets.getSystemWindowInsetBottom()));
+                    dp(gutter) + insets.getSystemWindowInsetRight(), 0);
             ReaderNavigation.updateInsets(v, insets);
             return insets; });
         getWindow().setBackgroundDrawable(new ColorDrawable(theme.background()));
@@ -185,8 +184,9 @@ public class CatalogActivity extends Activity {
         root.addView(mastDivider, new LinearLayout.LayoutParams(-1, dp(1))); gap(root, 10);
         if (!downloads) searchField();
         content = column(); root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
-        ReaderNavigation.add(root, theme, downloads ? ReaderNavigation.Tab.DOWNLOADS : ReaderNavigation.Tab.SEARCH, this::navigate);
         if (busy) loading(); else if (downloads) downloadsPage(); else searchPage();
+        ReaderNavigation.add(root, content, content.getChildAt(content.getChildCount() - 1), theme,
+                downloads ? ReaderNavigation.Tab.DOWNLOADS : ReaderNavigation.Tab.SEARCH, this::navigate);
     }
     private void navigate(ReaderNavigation.Tab tab) {
         if (tab == ReaderNavigation.Tab.SEARCH || tab == ReaderNavigation.Tab.DOWNLOADS) {

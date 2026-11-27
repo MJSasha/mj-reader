@@ -95,5 +95,5 @@ Compact chapter header; quick appearance behind the type icon. Footer has contex
 - Authoring comparisons use continuous Android recordings of signed 0.9.0 and the light-orbit build.
 - The navigation dock and text-reader footer use the larger of the system bottom inset and 8 dp.
   This leaves space when the gesture indicator is hidden and uses the system spacing when it is shown.
-- The navigation dock has a solid theme-specific surface distinct from book cards.
+- The navigation dock uses the shared rounded panel surface with a 1 dp tonal outline. Scrollable content extends behind the dock, with bottom padding so the last item can scroll clear of it.
 - Reading actions use local tonal hover and press fills and a distinct keyboard focus outline.
