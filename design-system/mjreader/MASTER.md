@@ -97,3 +97,9 @@ Compact chapter header; quick appearance behind the type icon. Footer has contex
   This leaves space when the gesture indicator is hidden and uses the system spacing when it is shown.
 - The navigation dock uses the shared rounded panel surface with a 1 dp tonal outline. Scrollable content extends behind the dock, with bottom padding so the last item can scroll clear of it.
 - Reading actions use local tonal hover and press fills and a distinct keyboard focus outline.
+
+## Navigation and page motion, 0.9.6
+
+- Follow MJWatch's short content entrance on explicit tab and settings-section changes, with an 8 dp offset and 240 ms settle. Keep the masthead, bottom dock and window stationary. Data refresh, resize and reduced motion skip the entrance.
+- Top-level destinations share the same masthead minimum height and dock width. The dock hides while the keyboard is visible, and the scrolling viewport ends at the keyboard.
+- On two-page spreads, the central rule stays fixed as the text slides. When a slide is in progress, retain the latest page-turn request and apply it at the next page boundary. Keep header and progress height stable across page turns.

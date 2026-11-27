@@ -44,7 +44,7 @@ public class ReaderSmokeTest extends Instrumentation {
             AppUpdates.prefs(context).edit().putBoolean("automatic", false).commit();
             if (updatesOnly) { new UpdateCheck(this).run(updateFixture); result.putString("stream", "PASS: OTA release selection, checksum/signature/version rejection, daily check limit, themed UI and persisted download cancellation\n"); finish(Activity.RESULT_OK, result); return; }
             if (showcaseOnly) { showcase(); result.putString("stream", "PASS: original demonstration screenshots\n"); finish(Activity.RESULT_OK, result); return; }
-            if (motionOnly) { startupCheck(context); pagesCheck(); result.putString("stream", "PASS: startup reveal, reader controls motion, rapid reversals, anchors, page swipes, edge taps, page slides, phone/spread, light/dark, large fonts and reduced motion\n"); finish(Activity.RESULT_OK, result); return; }
+            if (motionOnly) { startupCheck(context); navigationMotionCheck(context); pagesCheck(); result.putString("stream", "PASS: startup reveal, tab motion, reader controls motion, rapid reversals, anchors, page swipes, edge taps, page slides, phone/spread, light/dark, large fonts and reduced motion\n"); finish(Activity.RESULT_OK, result); return; }
             if (adaptiveOnly) { narrowScreenCheck(); adaptiveCheck(); pagesCheck(); result.putString("stream", "PASS: narrow 320/360 dp and Flip 7 proportions, RU/EN labels, phone/Fold/tablet resize, grid, reader position/fullscreen, EPUB illustration repair, exact page seams, one/two-page reflow, catalog retention, hover/focus and touch targets\n"); finish(Activity.RESULT_OK, result); return; }
             if (catalogOnly) { new CatalogCheck(this).run(liveCatalog); result.putString("stream", "PASS: OPDS failover, HTTPS EPUB download, cover/chapters import, cancellation/retry, background import, themed UI and recreation\n"); finish(Activity.RESULT_OK, result); return; }
             if (benchmarkOnly) {
@@ -1348,6 +1348,26 @@ public class ReaderSmokeTest extends Instrumentation {
             awaitField(slow, "librarySearch");
         } finally { gate.countDown(); runOnMainSync(slow::finish); }
     }
+    private void navigationMotionCheck(Context context) throws Exception {
+        MainActivity activity = startStableMain(context);
+        try {
+            runOnMainSync(() -> {
+                View root = (View) field(activity, "root");
+                root.findViewWithTag(ReaderNavigation.Tab.SETTINGS).performClick();
+                View next = (View) field(activity, "root");
+                View dock = next.findViewWithTag(ReaderNavigation.TAG);
+                View content = (View) field(activity, "settingsScroll");
+                if (content.getTranslationY() <= 0 || content.getAlpha() >= 1
+                        || next.getAlpha() != 1 || next.getTranslationY() != 0
+                        || dock.getAlpha() != 1 || dock.getTranslationY() != 0)
+                    throw new AssertionError("Tab entrance must animate only the incoming content");
+                dock.findViewWithTag(ReaderNavigation.Tab.LIBRARY).performClick();
+                View library = (View) field(activity, "root");
+                if (library.findViewWithTag(ReaderNavigation.Tab.LIBRARY).isSelected() == false)
+                    throw new AssertionError("A rapid tab switch left the wrong destination selected");
+            });
+        } finally { runOnMainSync(activity::finish); }
+    }
     private void pagesCheck() throws Exception {
         Context context = getTargetContext();
         var prefs = context.getSharedPreferences("reader", 0);
@@ -1395,6 +1415,18 @@ public class ReaderSmokeTest extends Instrumentation {
             if (pictures.length == 0 || pictures[0].bitmap == null) throw new AssertionError("Visible illustration not decoded");
             capture("pages-illustration-dark");
             checkReadingGestures(opened);
+            int original = pages.start();
+            ReaderPages rapid = pages;
+            runOnMainSync(() -> rapid.turn(1));
+            android.animation.ValueAnimator forward = awaitPageAnimation(rapid);
+            runOnMainSync(() -> {
+                forward.pause();
+                forward.setCurrentFraction(.5f);
+                rapid.turn(-1);
+                if (rapid.start() == original) throw new AssertionError("A queued turn interrupted the visible slide");
+                forward.end();
+            });
+            if (awaitPages(opened).start() != original) throw new AssertionError("Rapid reverse turn was dropped");
 
             for (int theme : new int[]{2, 0}) {
                 runOnMainSync(() -> {
@@ -1725,6 +1757,15 @@ public class ReaderSmokeTest extends Instrumentation {
                 }
             });
             if (frames[0].sameAs(frames[1]) || view.ready()) throw new AssertionError("Turn has no visible intermediate frame");
+            if (view.columns() == 2) {
+                int x = frames[0].getWidth() / 2;
+                int rule = frames[0].getPixel(x, frames[0].getHeight() / 2);
+                int matching = 0;
+                for (int y = 12; y < frames[1].getHeight() - 12; y++)
+                    if (frames[1].getPixel(x, y) == rule) matching++;
+                if (rule == 0 || matching <= frames[1].getHeight() / 2)
+                    throw new AssertionError("The spread divider moved with the page text");
+            }
             frames[0].recycle(); frames[1].recycle();
             capture("page-turn-" + name + "-" + direction);
             runOnMainSync(animation::resume); awaitPages(activity);
@@ -1801,6 +1842,8 @@ public class ReaderSmokeTest extends Instrumentation {
                             .build());
                     if (dock.getVisibility() != View.GONE)
                         throw new AssertionError("The navigation dock must hide with the keyboard");
+                    if (android.os.Build.VERSION.SDK_INT >= 35 && root.getPaddingBottom() != Math.round(280 * density))
+                        throw new AssertionError("Content viewport extends under the keyboard");
                 }
             } finally { root.requestApplyInsets(); }
         });

@@ -299,7 +299,11 @@ public class MainActivity extends Activity {
         if (settingsOpen) {
             settingsOpen = false;
             settingsY = 0;
-            if (settingsFromOverview) { settingsY = settingsOverviewY; settingsOverview(); }
+            if (settingsFromOverview) {
+                settingsY = settingsOverviewY;
+                settingsOverview();
+                ReaderNavigation.enter(settingsScroll);
+            }
             else if (current != null) reader(); else library();
             return;
         }
@@ -355,15 +359,17 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(options.background());
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             int width = getResources().getConfiguration().screenWidthDp;
-            int limit = settingsOpen || (current != null && (focus || !options.flag("pages", false))) ? 700 : 1200;
+            boolean navigationDock = view.findViewWithTag(ReaderNavigation.TAG) != null;
+            int limit = navigationDock ? ReaderNavigation.MAX_WIDTH
+                    : settingsOpen || (current != null && (focus || !options.flag("pages", false))) ? 700 : 1200;
             int gutter = Math.max(width >= 600 ? 24 : 16, (width - limit) / 2);
             boolean reader = current != null && !settingsOpen;
             int bottom = reader ? insets.getStableInsetBottom() : insets.getSystemWindowInsetBottom();
-            boolean navigationDock = view.findViewWithTag(ReaderNavigation.TAG) != null;
             view.setPadding(dp(gutter) + (reader ? insets.getStableInsetLeft() : insets.getSystemWindowInsetLeft()),
                     dp(8) + (reader ? insets.getStableInsetTop() : insets.getSystemWindowInsetTop()),
                     dp(gutter) + (reader ? insets.getStableInsetRight() : insets.getSystemWindowInsetRight()),
-                    navigationDock ? 0 : reader && !focus ? ReaderNavigation.bottomPadding(this, bottom) : dp(8) + bottom);
+                    navigationDock ? ReaderNavigation.imeBottom(insets)
+                            : reader && !focus ? ReaderNavigation.bottomPadding(this, bottom) : dp(8) + bottom);
             ReaderNavigation.updateInsets(view, insets);
             return insets;
         });
@@ -587,14 +593,26 @@ public class MainActivity extends Activity {
     }
     private void navigate(ReaderNavigation.Tab tab) {
         switch (tab) {
-            case LIBRARY -> { if (settingsOpen) library(); }
-            case SETTINGS -> { if (!settingsOverview) { settingsY = 0; settingsOverview(); } }
+            case LIBRARY -> {
+                if (settingsOpen) {
+                    library();
+                    ReaderNavigation.enter(libraryList);
+                }
+            }
+            case SETTINGS -> {
+                if (!settingsOverview) {
+                    settingsY = 0;
+                    settingsOverview();
+                    ReaderNavigation.enter(settingsScroll);
+                }
+            }
             case SEARCH -> showCatalog(false);
             case DOWNLOADS -> showCatalog(true);
         }
     }
     private void showCatalog(boolean downloads) {
-        startActivityForResult(new Intent(this, CatalogActivity.class).putExtra(CatalogActivity.EXTRA_DOWNLOADS, downloads), CATALOG_REQUEST);
+        Intent intent = new Intent(this, CatalogActivity.class).putExtra(CatalogActivity.EXTRA_DOWNLOADS, downloads);
+        startActivityForResult(intent, CATALOG_REQUEST, ActivityOptions.makeCustomAnimation(this, 0, 0).toBundle());
     }
     private void refreshCatalog(String id) {
         worker.execute(() -> {
@@ -1112,7 +1130,14 @@ public class MainActivity extends Activity {
         chapterLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         chapterLabel.setMaxLines(1); chapterLabel.setEllipsize(TextUtils.TruncateAt.END);
         identity.addView(chapterLabel);
-        identity.setMinimumHeight(dp(48)); identity.setGravity(Gravity.CENTER_VERTICAL);
+        // A chapter title can replace the book title. Keep the reading viewport
+        // the same height when the second line appears or disappears.
+        if (!compact) {
+            title.setIncludeFontPadding(false);
+            chapterLabel.setIncludeFontPadding(false);
+        }
+        identity.setMinimumHeight(compact ? dp(48) : Math.max(dp(48), title.getLineHeight() + chapterLabel.getLineHeight()));
+        identity.setGravity(Gravity.CENTER_VERTICAL);
         identity.setBackground(feedback(shape(options.background(), 12)));
         identity.setFocusable(true); identity.setOnClickListener(v -> contents());
         identity.setContentDescription(tr("Оглавление: ", "Contents: ") + title(current));
@@ -1262,8 +1287,8 @@ public class MainActivity extends Activity {
         counter = label("", 13, options.muted());
         counter.setGravity(Gravity.CENTER);
         counter.setMinHeight(dp(48));
-        if (compact) { counter.setMaxLines(1); counter.setEllipsize(TextUtils.TruncateAt.END); }
-        else counter.setTextColor(new ColorStateList(new int[][]{{android.R.attr.state_pressed},
+        counter.setMaxLines(1); counter.setEllipsize(TextUtils.TruncateAt.END);
+        if (!compact) counter.setTextColor(new ColorStateList(new int[][]{{android.R.attr.state_pressed},
                 {android.R.attr.state_hovered}, {}}, new int[]{options.ink(), options.ink(), options.muted()}));
         counter.setContentDescription(tr("Прогресс и переход по книге", "Reading progress and navigation"));
         counter.setOnClickListener(v -> readingNavigation());
@@ -1532,7 +1557,7 @@ public class MainActivity extends Activity {
     private void restoreAnchor() {
         if (body == null || body.getLayout() == null || textScroll == null) return;
         int line = body.getLayout().getLineForOffset(Math.max(0, Math.min(anchor - textStart, body.length())));
-        textScroll.scrollTo(0, body.getLayout().getLineTop(line) + body.getPaddingTop());
+        textScroll.scrollTo(0, anchor == 0 ? 0 : body.getLayout().getLineTop(line) + body.getPaddingTop());
     }
     private void turnPage(int direction) {
         if (pageReader != null) { pageReader.turn(direction); return; }
@@ -1569,7 +1594,8 @@ public class MainActivity extends Activity {
         int end = chapter + 1 < current.chapters().size() ? current.chapters().get(chapter + 1).offset() : current.text().length() - 1;
         int minutes = Math.max(1, (int) Math.ceil((reading.wordAt(end) - position) / 250.0));
         String progress = percent + "%  ·  " + tr("≈ " + minutes + " мин до конца главы", "≈ " + minutes + " min left in chapter");
-        counter.setText(getResources().getConfiguration().screenHeightDp < 400
+        var configuration = getResources().getConfiguration();
+        counter.setText(configuration.screenHeightDp < 400 || configuration.screenWidthDp < 360 || configuration.fontScale >= 1.6f
                 ? percent + "%  ·  " + tr("≈ " + minutes + " мин", "≈ " + minutes + " min") : progress);
         counter.setContentDescription(progress + ". " + tr("Навигация", "Navigation"));
         if (chapterLabel != null) updateChapterLabel();
@@ -1889,6 +1915,7 @@ public class MainActivity extends Activity {
     }
     private void settingsHeader(String title) {
         LinearLayout top = row();
+        top.setMinimumHeight(dp(48));
         if (!settingsOverview) {
             top.addView(readerAction("back", tr("Назад", "Back"), this::back), new LinearLayout.LayoutParams(dp(48), dp(48)));
             space(top);
@@ -1937,6 +1964,7 @@ public class MainActivity extends Activity {
         settingsOverviewY = settingsScroll.getScrollY();
         settingsY = 0;
         open.run();
+        ReaderNavigation.enter(settingsScroll);
     }
     private LinearLayout settingsPage() {
         settingsScroll = new ScrollView(this);

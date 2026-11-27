@@ -1,5 +1,6 @@
 package com.mjreader;
 
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
@@ -10,6 +11,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -21,6 +23,7 @@ final class ReaderNavigation {
     private static final int ITEM_HEIGHT = 48;
     private static final int PANEL_PADDING = 4;
     private static final int GAP = 8;
+    static final int MAX_WIDTH = 1040;
 
     enum Tab {
         LIBRARY(R.string.library, "library"), SEARCH(R.string.search, "search"),
@@ -62,6 +65,22 @@ final class ReaderNavigation {
         var shape = theme.feature(context.getResources().getDisplayMetrics().density, 20);
         shape.setStroke(dp(context, 1), theme.surfaceHigh());
         return shape;
+    }
+
+    /** Move only the incoming content. The heading, dock and window stay in place. */
+    static void enter(View content) {
+        if (content == null || !ValueAnimator.areAnimatorsEnabled()) return;
+        content.animate().cancel();
+        content.setTranslationY(dp(content.getContext(), 8));
+        content.setAlpha(.7f);
+        content.animate().translationY(0).alpha(1).setDuration(240)
+                .setInterpolator(new DecelerateInterpolator()).start();
+    }
+
+    static int imeBottom(WindowInsets insets) {
+        // Android 15+ enforces edge-to-edge. adjustResize dispatches the IME inset
+        // there, but leaves it to us to keep the scrolling viewport above it.
+        return Build.VERSION.SDK_INT >= 35 ? insets.getInsets(WindowInsets.Type.ime()).bottom : 0;
     }
 
     static Button readingItem(Context context, ReaderOptions theme, String title, String icon, Runnable click) {

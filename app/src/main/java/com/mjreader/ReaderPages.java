@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.*;
 import android.os.Bundle;
 import android.text.*;
+import android.util.TypedValue;
 import android.view.*;
 import android.view.accessibility.AccessibilityNodeInfo;
 import java.util.*;
@@ -23,7 +24,7 @@ final class ReaderPages extends View {
     private final ArrayDeque<Integer> history = new ArrayDeque<>();
     private final TextPaint paint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private List<Page> pages = List.of();
-    private int anchor, end, generation;
+    private int anchor, end, generation, pendingTurn;
     private boolean loading;
     private boolean swipeCandidate;
     private float downX, downY;
@@ -39,7 +40,8 @@ final class ReaderPages extends View {
         this.note = note;
         this.worker = worker; this.style = style; this.moved = moved;
         paint.setColor(options.ink());
-        paint.setTextSize(options.number("size", 21) * getResources().getDisplayMetrics().scaledDensity);
+        paint.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP,
+                options.number("size", 21), getResources().getDisplayMetrics()));
         paint.setTypeface(options.typeface(context));
         paint.setTextLocale(ReaderText.language(book.text()));
         setFocusable(true); setClickable(true); setLongClickable(true);
@@ -53,8 +55,7 @@ final class ReaderPages extends View {
                 return true;
             }
             @Override public boolean onSingleTapUp(MotionEvent event) {
-                if (!ready()) return true;
-                if (note.test(noteOffsetAt(event.getX(), event.getY()))) return true;
+                if (ready() && note.test(noteOffsetAt(event.getX(), event.getY()))) return true;
                 int edge = event.getX() < getWidth() * .25f ? -1 : event.getX() > getWidth() * .75f ? 1 : 0;
                 if (edge == 0) performClick();
                 else if (options.flag("edgeTurns", true)) turn(edge);
@@ -62,7 +63,7 @@ final class ReaderPages extends View {
             }
             @Override public void onLongPress(MotionEvent event) {
                 swipeCandidate = false;
-                paragraph.accept(offsetAt(event.getX(), event.getY()));
+                if (ready()) paragraph.accept(offsetAt(event.getX(), event.getY()));
             }
         });
     }
@@ -109,7 +110,11 @@ final class ReaderPages extends View {
         return true;
     }
     void turn(int direction) {
-        if (!ready()) return;
+        if (pages.isEmpty()) return;
+        if (!ready()) {
+            pendingTurn = direction;
+            return;
+        }
         if (direction > 0 && end < book.text().length()) {
             history.addLast(anchor);
             if (history.size() > 100) history.removeFirst();
@@ -174,6 +179,7 @@ final class ReaderPages extends View {
                 }
                 setContentDescription(description.toString().replace("\uFFFC", ""));
                 moved.accept(anchor); invalidate();
+                if (pageTurn == null) turnPending();
             });
         });
     }
@@ -190,15 +196,15 @@ final class ReaderPages extends View {
     }
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+        if (columns() == 2) {
+            rule.setColor(options.muted()); rule.setAlpha(55);
+            canvas.drawRect(getWidth() / 2f, dp(12), getWidth() / 2f + dp(1), getHeight() - dp(12), rule);
+        }
         if (pageTurn != null) pageTurn.draw(canvas);
         else drawPages(canvas, pages);
     }
     private void drawPages(Canvas canvas, List<Page> shown) {
         int width = pageWidth(), stride = width + margin() * 2 + dp(32);
-        if (columns() == 2) {
-            rule.setColor(options.muted()); rule.setAlpha(55);
-            canvas.drawRect(getWidth() / 2f, dp(12), getWidth() / 2f + dp(1), getHeight() - dp(12), rule);
-        }
         for (int i = 0; i < shown.size(); i++) {
             Page page = shown.get(i);
             int save = canvas.save();
@@ -212,10 +218,16 @@ final class ReaderPages extends View {
         }
     }
     private void finishTurn() {
+        pendingTurn = 0;
         PageTurn finished = pageTurn;
         pageTurn = null;
         if (finished != null) finished.animator.cancel();
         invalidate();
+    }
+    private void turnPending() {
+        int direction = pendingTurn;
+        pendingTurn = 0;
+        if (direction != 0) turn(direction);
     }
     /** Slide the existing bounded layouts; no page textures or simulated paper. */
     private final class PageTurn {
@@ -230,7 +242,11 @@ final class ReaderPages extends View {
             animator.addUpdateListener(value -> { progress = (float) value.getAnimatedValue(); invalidate(); });
             animator.addListener(new android.animation.AnimatorListenerAdapter() {
                 @Override public void onAnimationEnd(android.animation.Animator animation) {
-                    if (pageTurn == PageTurn.this) { pageTurn = null; invalidate(); }
+                    if (pageTurn == PageTurn.this) {
+                        pageTurn = null;
+                        invalidate();
+                        turnPending();
+                    }
                 }
             });
         }

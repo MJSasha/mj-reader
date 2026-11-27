@@ -75,6 +75,12 @@ public class CatalogActivity extends Activity {
     };
     @Override public void onCreate(Bundle state) {
         super.onCreate(state); prefs = getSharedPreferences("reader", MODE_PRIVATE); theme = ReaderOptions.load(prefs, null);
+        boolean fromTabs = getCallingActivity() != null;
+        boolean openingTab = fromTabs && state == null;
+        if (fromTabs && Build.VERSION.SDK_INT >= 34) {
+            overrideActivityTransition(OVERRIDE_TRANSITION_OPEN, 0, 0);
+            overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0);
+        }
         Session previous = state == null && getCallingActivity() != null ? session : null;
         if (previous != null) { state = previous.frame(); clearSession(); }
         downloads = getIntent().getBooleanExtra(EXTRA_DOWNLOADS, false);
@@ -96,6 +102,7 @@ public class CatalogActivity extends Activity {
         }
         setResult(RESULT_OK); render();
         if (!restoreUrl.isEmpty() && !downloads) load(restoreUrl, false);
+        if (openingTab) ReaderNavigation.enter(content);
     }
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
@@ -128,6 +135,7 @@ public class CatalogActivity extends Activity {
             session = new Session(frame, (Retained) onRetainNonConfigurationInstance());
         }
         super.finish();
+        if (Build.VERSION.SDK_INT < 34 && getCallingActivity() != null) overridePendingTransition(0, 0);
     }
     private void rememberScroll() {
         if (downloads && downloadsList != null && downloadsList.isAttachedToWindow() && downloadsList.getChildCount() > 0) {
@@ -162,15 +170,16 @@ public class CatalogActivity extends Activity {
         root = column(); root.setBackgroundColor(theme.background());
         ReaderOptions.observeWindow(root, () -> { if (!isDestroyed()) { rememberQuery(); rememberScroll(); render(); } });
         root.setOnApplyWindowInsetsListener((v, insets) -> { int width = getResources().getConfiguration().screenWidthDp;
-            int gutter = Math.max(width >= 600 ? 24 : 16, (width - 1040) / 2);
+            int gutter = Math.max(width >= 600 ? 24 : 16, (width - ReaderNavigation.MAX_WIDTH) / 2);
             v.setPadding(dp(gutter) + insets.getSystemWindowInsetLeft(), dp(8) + insets.getSystemWindowInsetTop(),
-                    dp(gutter) + insets.getSystemWindowInsetRight(), 0);
+                    dp(gutter) + insets.getSystemWindowInsetRight(), ReaderNavigation.imeBottom(insets));
             ReaderNavigation.updateInsets(v, insets);
             return insets; });
         getWindow().setBackgroundDrawable(new ColorDrawable(theme.background()));
         getWindow().getDecorView().setSystemUiVisibility(theme.light() ? View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR : 0);
         setContentView(root); root.requestApplyInsets();
         LinearLayout mast = row();
+        mast.setMinimumHeight(dp(48));
         if (!downloads && !history.isEmpty()) {
             mast.addView(iconButton(tr("Назад", "Back"), "back", this::back)); space(mast);
         }
@@ -207,7 +216,9 @@ public class CatalogActivity extends Activity {
         generation++; if (task != null) task.cancel(true);
         if (busy) message = feedTitle;
         pendingUrl = ""; busy = false; loadingMore = false; downloads = value;
-        render(); handler.removeCallbacks(refresh); handler.post(refresh);
+        render();
+        ReaderNavigation.enter(content);
+        handler.removeCallbacks(refresh); handler.post(refresh);
     }
     private void searchField() {
         LinearLayout searchBox = row();
