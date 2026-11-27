@@ -103,3 +103,9 @@ Compact chapter header; quick appearance behind the type icon. Footer has contex
 - Follow MJWatch's short content entrance on explicit tab and settings-section changes, with an 8 dp offset and 240 ms settle. Keep the masthead, bottom dock and window stationary. Data refresh, resize and reduced motion skip the entrance.
 - Top-level destinations share the same masthead minimum height and dock width. The dock hides while the keyboard is visible, and the scrolling viewport ends at the keyboard.
 - On two-page spreads, the central rule stays fixed as the text slides. When a slide is in progress, retain the latest page-turn request and apply it at the next page boundary. Reserve room for both reader panels outside the fixed text viewport, including while they are hidden. Keep header and progress height stable across page turns.
+
+## Dialogs, settings and updates, 0.9.7
+
+- Choice dialogs use one rounded list with dividers and trailing marks for selected rows. Keep labels intact and expose selection to accessibility services. Open the table of contents with the current chapter in view. The close action stays above the scrolling list.
+- Put settings section headings above their surfaces. A down chevron opens a choice dialog, and a right chevron opens a settings page.
+- Keep the installed version, update status and actions together. Release notes start collapsed. Keep automatic checks and the link to GitHub Releases accessible below.

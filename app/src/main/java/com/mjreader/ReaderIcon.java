@@ -75,6 +75,8 @@ final class ReaderIcon extends Drawable {
             case "back" -> { path(canvas, 13, 5, 6, 12, 13, 19); line(canvas, 6, 12, 21, 12); }
             case "forward" -> { path(canvas, 11, 5, 18, 12, 11, 19); line(canvas, 3, 12, 18, 12); }
             case "next" -> path(canvas, 9, 6, 15, 12, 9, 18);
+            case "down" -> path(canvas, 6, 9, 12, 15, 18, 9);
+            case "up" -> path(canvas, 6, 15, 12, 9, 18, 15);
             case "more" -> { for (int y : new int[]{5, 12, 19}) canvas.drawCircle(12, y, 1, paint); }
             case "info" -> { canvas.drawCircle(12, 12, 9, paint); line(canvas, 12, 11, 12, 17); canvas.drawCircle(12, 7.5f, .5f, paint); }
             case "globe" -> { canvas.drawCircle(12, 12, 9, paint); canvas.drawOval(8, 3, 16, 21, paint); line(canvas, 3, 12, 21, 12); }

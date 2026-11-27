@@ -1458,7 +1458,8 @@ public class MainActivity extends Activity {
     private AlertDialog quickAppearance() {
         LinearLayout content = column();
         textSizeControl(content, true);
-        ReaderDialogs sheet = dialogs().setView(content).setNegativeButton(tr("Готово", "Done"), null);
+        ReaderDialogs sheet = dialogs().setTitle(tr("Быстрое оформление", "Quick appearance"))
+                .setView(content).setNegativeButton(tr("Готово", "Done"), null);
         if (getResources().getConfiguration().screenHeightDp >= 500)
             sheet.setPositiveButton(tr("Все настройки", "All settings"), (d, which) -> settings(false));
         AlertDialog panel = sheet.show();
@@ -1657,7 +1658,7 @@ public class MainActivity extends Activity {
     }
     private void contents() {
         String[] titles = current.chapters().stream().map(Books.Chapter::title).toArray(String[]::new);
-        dialogs().setTitle(tr("Оглавление", "Contents")).setItems(titles,
+        dialogs().setTitle(tr("Оглавление", "Contents")).setItems(titles, chapterIndex(),
                 (d, index) -> jump(current.chapters().get(index).offset())).setNegativeButton(android.R.string.cancel, null).show();
     }
     private void searchBook() {
@@ -1936,10 +1937,9 @@ public class MainActivity extends Activity {
         LinearLayout application = settingsGroup(page, "info", tr("Приложение", "Application"));
         String[] themes = themeNames();
         int themeIndex = Math.max(0, Math.min(themes.length - 1, options.number("theme", 0)));
-        application.addView(settingsAction("palette", tr("Тема", "Theme"), themes[themeIndex],
-                () -> chooseDialog(tr("Тема", "Theme"), themes, themeIndex, value -> {
-                    options.put("theme", value); changedOptions();
-                })));
+        application.addView(choiceSetting("palette", tr("Тема", "Theme"), themes, themeIndex, value -> {
+            options.put("theme", value); changedOptions();
+        }));
         settingsDivider(application);
         application.addView(updateSettingsAction());
         ReaderNavigation.add(root, settingsScroll, settingsScroll, options, ReaderNavigation.Tab.SETTINGS, this::navigate);
@@ -1967,14 +1967,19 @@ public class MainActivity extends Activity {
         scroll.post(() -> scroll.scrollTo(0, y));
     }
     private LinearLayout settingsAction(String icon, String title, String value, Runnable click) {
+        return settingsAction(icon, title, value, "next", click);
+    }
+    private LinearLayout settingsAction(String icon, String title, String value, String trailingIcon, Runnable click) {
         LinearLayout action = row();
-        action.setMinimumHeight(dp(56));
+        action.setMinimumHeight(dp(60));
         action.setPadding(dp(4), dp(8), dp(4), dp(8));
-        action.setBackground(feedback(shape(options.surface(), 12)));
+        action.setBackground(options.tonalFeedback(shape(Color.TRANSPARENT, 12), getResources().getDisplayMetrics().density));
         ImageView symbol = new ImageView(this);
-        symbol.setImageDrawable(new ReaderIcon(this, icon, options.ink()));
+        symbol.setImageDrawable(new ReaderIcon(this, icon, options.accent()));
         symbol.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        action.addView(symbol, new LinearLayout.LayoutParams(dp(24), dp(24))); space(action);
+        LinearLayout.LayoutParams iconSpace = new LinearLayout.LayoutParams(dp(24), dp(24));
+        iconSpace.setMarginEnd(dp(12));
+        action.addView(symbol, iconSpace);
         LinearLayout labels = column();
         labels.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         TextView caption = label(title, 16, options.ink());
@@ -1985,7 +1990,7 @@ public class MainActivity extends Activity {
         labels.addView(detail);
         action.addView(labels, weight()); space(action);
         ImageView next = new ImageView(this);
-        next.setImageDrawable(new ReaderIcon(this, "next", options.muted()));
+        next.setImageDrawable(new ReaderIcon(this, trailingIcon, options.muted()));
         next.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         action.addView(next, new LinearLayout.LayoutParams(dp(24), dp(24)));
         action.setContentDescription(title + ". " + value);
@@ -2006,16 +2011,20 @@ public class MainActivity extends Activity {
     }
     private LinearLayout settingsGroup(LinearLayout parent, String icon, String title) {
         if (parent.getChildCount() > 0) gap(parent, 20);
-        LinearLayout group = column();
-        group.setPadding(dp(16), dp(16), dp(16), dp(16));
-        group.setBackground(shape(options.surface(), 20));
-        TextView heading = label(title, 18, options.ink());
-        heading.setTypeface(Typeface.DEFAULT_BOLD);
-        heading.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, icon, options.accent()), null, null, null);
+        TextView heading = label(title, 14, options.muted());
+        heading.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        heading.setPaddingRelative(dp(4), 0, 0, 0);
+        ReaderIcon marker = new ReaderIcon(this, icon, options.accent());
+        marker.setBounds(0, 0, dp(18), dp(18));
+        heading.setCompoundDrawablesRelative(marker, null, null, null);
         heading.setCompoundDrawablePadding(dp(12));
         if (Build.VERSION.SDK_INT >= 28) heading.setAccessibilityHeading(true);
-        group.addView(heading, matchWrap());
-        gap(group, 12);
+        parent.addView(heading, matchWrap());
+        gap(parent, 8);
+        LinearLayout group = column();
+        group.setPadding(dp(12), dp(8), dp(12), dp(8));
+        group.setBackground(shape(options.surface(), 20));
         parent.addView(group, matchWrap());
         return group;
     }
@@ -2035,7 +2044,7 @@ public class MainActivity extends Activity {
                 int theme = line * 2 + col;
                 if (col > 0) space(row);
                 boolean selected = options.number("theme", 0) == theme;
-                Button button = button((selected ? "✓  " : "") + names[theme], selected, () -> {
+                Button button = button(names[theme], selected, () -> {
                     options.put("theme", theme); changedOptions();
                 });
                 button.setSelected(selected);
@@ -2468,24 +2477,21 @@ public class MainActivity extends Activity {
         parent.addView(controls); gap(parent, 16);
     }
     private void choose(LinearLayout parent, String icon, String caption, String[] items, int selected, IntConsumer change) {
+        parent.addView(choiceSetting(icon, caption, items, selected, change), matchWrap());
+        settingsDivider(parent);
+        gap(parent, 8);
+    }
+    private LinearLayout choiceSetting(String icon, String caption, String[] items, int selected, IntConsumer change) {
         int[] current = {selected};
-        LinearLayout action = settingsAction(icon, caption, items[selected], () -> {});
-        action.setOnClickListener(v -> chooseDialog(caption, items, current[0], value -> {
+        LinearLayout action = settingsAction(icon, caption, items[selected], "down", () -> {});
+        action.setOnClickListener(v -> dialogs().setTitle(caption).setItems(items, current[0], (dialog, value) -> {
+            if (value == current[0]) return;
             current[0] = value;
             ((TextView) action.findViewWithTag("setting-value")).setText(items[value]);
             action.setContentDescription(caption + ". " + items[value]);
             change.accept(value);
-        }));
-        parent.addView(action, matchWrap());
-        settingsDivider(parent);
-        gap(parent, 8);
-    }
-    private void chooseDialog(String title, String[] items, int selected, IntConsumer change) {
-        String[] labels = items.clone();
-        labels[selected] = "✓  " + labels[selected];
-        dialogs().setTitle(title).setItems(labels, (dialog, which) -> {
-            if (which != selected) change.accept(which);
-        }).show();
+        }).show());
+        return action;
     }
     private void toggle(LinearLayout parent, String title, boolean checked, java.util.function.Consumer<Boolean> change) {
         Button control = button(title, false, () -> {});

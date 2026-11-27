@@ -61,14 +61,18 @@ final class ReaderDialogs {
                     @Override protected void onMeasure(int width, int height) {
                         int available = Math.min(MeasureSpec.getSize(height),
                                 context.getResources().getDisplayMetrics().heightPixels - dp(64));
-                        super.onMeasure(width, MeasureSpec.makeMeasureSpec(available, MeasureSpec.AT_MOST));
+                        if (items != null) available = Math.min(available, dp(620));
+                        super.onMeasure(width, MeasureSpec.makeMeasureSpec(Math.max(1, available), MeasureSpec.AT_MOST));
                     }
                 };
                 page.setOrientation(LinearLayout.VERTICAL);
-                page.setPadding(dp(20), dp(12), dp(20), dp(16));
-                page.setBackground(shape(theme.surface(), 20));
+                page.setPadding(dp(16), dp(12), dp(16), dp(16));
+                GradientDrawable panel = shape(theme.surface(), 24);
+                panel.setStroke(dp(1), theme.surfaceHigh());
+                page.setBackground(panel);
                 LinearLayout header = new LinearLayout(context);
-                header.setGravity(Gravity.TOP); header.setBaselineAligned(false);
+                header.setGravity(Gravity.CENTER_VERTICAL); header.setBaselineAligned(false);
+                header.setPaddingRelative(dp(4), 0, 0, 0);
                 TextView heading = text(title == null ? "" : title, 22);
                 heading.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
                 heading.setMaxLines(2); heading.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -85,14 +89,14 @@ final class ReaderDialogs {
                 close.setTag("dialog-close"); close.setContentDescription(closeLabel); close.setTooltipText(closeLabel);
                 close.setMinWidth(dp(48)); close.setMinimumWidth(dp(48)); close.setPadding(0, 0, 0, 0);
                 LayerDrawable background = new LayerDrawable(new Drawable[]{
-                        theme.feedback(shape(theme.surface(), 14), context.getResources().getDisplayMetrics().density),
+                        theme.tonalFeedback(shape(theme.surfaceHigh(), 24), context.getResources().getDisplayMetrics().density),
                         new ReaderIcon(context, "close", theme.ink())});
                 background.setLayerSize(1, dp(24), dp(24)); background.setLayerGravity(1, Gravity.CENTER);
                 close.setBackground(background); close.setOnClickListener(v -> cancel());
                 if (closeAction != 0) buttons.put(closeAction, close);
                 header.addView(close, new LinearLayout.LayoutParams(dp(48), dp(48)));
                 page.addView(header, new LinearLayout.LayoutParams(-1, -2));
-                gap(page, 12);
+                gap(page, 8);
                 LinearLayout body = column();
                 ScrollView viewport = new ScrollView(context);
                 viewport.setTag("dialog-scroll"); viewport.setClipToPadding(false);
@@ -103,29 +107,46 @@ final class ReaderDialogs {
                     if (custom != null || (items != null && items.length > 0)) gap(body, 12);
                 }
                 if (custom != null) body.addView(custom);
-                if (items != null) for (int i = 0; i < items.length; i++) {
-                    final int index = i;
-                    Button item = control((checked != null && checked[i] ? "✓  " : "") + items[i], false);
-                    item.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-                    boolean selected = i == selectedItem;
-                    item.setBackground(theme.feedback(shape(selected ? theme.selection() : theme.surfaceHigh(), 12),
-                            context.getResources().getDisplayMetrics().density));
-                    item.setSelected(selected || checked != null && checked[i]);
-                    if (selected) item.setCompoundDrawablesRelativeWithIntrinsicBounds(item.getCompoundDrawablesRelative()[0],
-                            null, new ReaderIcon(context, "check", theme.accent()), null);
-                    item.setOnClickListener(view -> {
-                        if (checked != null) {
-                            checked[index] = !checked[index];
-                            item.setText((checked[index] ? "✓  " : "") + items[index]);
-                            item.setSelected(checked[index]);
-                            multiClick.onClick(this, index, checked[index]);
-                        } else {
-                            dismiss();
-                            itemClick.onClick(this, index);
+                if (items != null && items.length > 0) {
+                    LinearLayout choices = column();
+                    choices.setBackground(shape(theme.surfaceHigh(), 16));
+                    choices.setClipToOutline(true);
+                    body.addView(choices, new LinearLayout.LayoutParams(-1, -2));
+                    for (int i = 0; i < items.length; i++) {
+                        int index = i;
+                        Button item = control(items[i].toString(), false);
+                        item.setTag("dialog-item-" + i);
+                        item.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+                        item.setMinHeight(dp(52));
+                        styleItem(item, i == selectedItem || checked != null && checked[i]);
+                        if (selectedItem >= 0 || checked != null) item.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+                            @Override public void onInitializeAccessibilityNodeInfo(View view, android.view.accessibility.AccessibilityNodeInfo info) {
+                                super.onInitializeAccessibilityNodeInfo(view, info);
+                                info.setClassName(checked == null ? RadioButton.class.getName() : CheckBox.class.getName());
+                                info.setCheckable(true);
+                                info.setChecked(view.isSelected());
+                                info.setSelected(false);
+                            }
+                        });
+                        item.setOnClickListener(view -> {
+                            if (checked != null) {
+                                checked[index] = !checked[index];
+                                styleItem(item, checked[index]);
+                                multiClick.onClick(this, index, checked[index]);
+                            } else {
+                                dismiss();
+                                itemClick.onClick(this, index);
+                            }
+                        });
+                        choices.addView(item, new LinearLayout.LayoutParams(-1, -2));
+                        if (i == selectedItem) item.post(() -> viewport.scrollTo(0,
+                                choices.getTop() + item.getTop() - (viewport.getHeight() - item.getHeight()) / 2));
+                        if (i + 1 < items.length) {
+                            View divider = new View(context);
+                            divider.setBackgroundColor(theme.surface());
+                            choices.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
                         }
-                    });
-                    body.addView(item, new LinearLayout.LayoutParams(-1, -2));
-                    if (i + 1 < items.length) gap(body, 8);
+                    }
                 }
                 int actionCount = labels.size() - (closeAction == 0 ? 0 : 1);
                 if (actionCount > 0) gap(body, 16);
@@ -190,7 +211,7 @@ final class ReaderDialogs {
                 if (window != null) {
                     window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
                     window.setLayout(Math.min(context.getResources().getDisplayMetrics().widthPixels - dp(32), dp(560)), -2);
-                    window.setDimAmount(.65f);
+                    window.setDimAmount(.52f);
                     if (backdrop != null) {
                         window.setLayout(-1, -1); window.setDimAmount(0); window.setWindowAnimations(0);
                         window.getDecorView().setSystemUiVisibility(theme.light()
@@ -218,6 +239,18 @@ final class ReaderDialogs {
         return null;
     }
     private int dp(int value) { return Math.round(value * context.getResources().getDisplayMetrics().density); }
+    private void styleItem(Button item, boolean selected) {
+        item.setSelected(selected);
+        item.setTextColor(selected ? theme.onSelection() : theme.ink());
+        item.setBackground(theme.tonalFeedback(shape(selected ? theme.selection() : Color.TRANSPARENT, 0),
+                context.getResources().getDisplayMetrics().density));
+        Drawable marker = null;
+        if (selectedItem >= 0 || checked != null) {
+            marker = selected ? new ReaderIcon(context, "check", theme.accent()) : new ColorDrawable(Color.TRANSPARENT);
+            marker.setBounds(0, 0, dp(24), dp(24));
+        }
+        item.setCompoundDrawablesRelative(item.getCompoundDrawablesRelative()[0], null, marker, null);
+    }
     private boolean dismissLabel(String label) {
         return label.equals(context.getString(android.R.string.cancel)) || switch (label) {
             case "Отмена", "Закрыть", "Готово", "Cancel", "Close", "Done" -> true;

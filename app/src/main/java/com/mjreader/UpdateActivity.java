@@ -18,11 +18,11 @@ public class UpdateActivity extends Activity {
     private ScrollView page;
     private LinearLayout transfer;
     private ProgressBar progress;
-    private Button action, cancel, check;
+    private Button action, cancel, check, notes;
     private AppUpdates.Release release;
     private String message = "";
     private boolean busy, checking, polling, resumed, ready, failed;
-    private boolean openCompletedOffer;
+    private boolean openCompletedOffer, notesExpanded;
     private int percent = -1;
     private int generation;
     private long verifiedId = -1;
@@ -45,9 +45,12 @@ public class UpdateActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         theme = ReaderOptions.load(getSharedPreferences("reader", 0), null);
+        notesExpanded = state != null && state.getBoolean("notesExpanded");
         release = AppUpdates.cached(this);
         try { if (release != null && AppUpdates.compare(release.version(), AppUpdates.version(this)) <= 0) release = null; } catch (Exception ignored) { release = null; }
-        message = release == null ? tr("Проверьте, доступна ли новая версия.", "Check for a new version.") : tr("Доступно обновление", "Update available");
+        if (release != null) message = tr("Доступно обновление", "Update available");
+        else if (AppUpdates.prefs(this).getLong("checked", 0) > 0)
+            message = tr("Установлена актуальная версия", "You are up to date");
         render();
         AppUpdates.prefs(this).registerOnSharedPreferenceChangeListener(changed);
         if (state == null && getIntent().hasExtra(EXTRA_OFFER)) {
@@ -59,6 +62,10 @@ public class UpdateActivity extends Activity {
                 act(true);
             }
         }
+    }
+    @Override protected void onSaveInstanceState(Bundle state) {
+        state.putBoolean("notesExpanded", notesExpanded);
+        super.onSaveInstanceState(state);
     }
     @Override protected void onResume() { super.onResume(); resumed = true; handler.post(refresh); }
     @Override protected void onPause() {
@@ -78,7 +85,7 @@ public class UpdateActivity extends Activity {
                     dp(gutter) + insets.getSystemWindowInsetRight(), dp(8) + insets.getSystemWindowInsetBottom()); return insets;
         });
         LinearLayout header = new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
-        Button back = button(tr("Назад", "Back"), false, this::finish);
+        Button back = button(tr("Назад", "Back"), "back", false, this::finish);
         back.setText(""); back.setContentDescription(tr("Назад", "Back")); back.setTooltipText(tr("Назад", "Back"));
         back.setPadding(dp(12), 0, dp(12), 0);
         back.setBackground(theme.feedback(shape(theme.background(), 16), getResources().getDisplayMetrics().density));
@@ -86,7 +93,8 @@ public class UpdateActivity extends Activity {
         TextView title = heading(tr("Обновления", "Updates"), 28); title.setPadding(dp(8), 0, 0, 0);
         header.addView(title, new LinearLayout.LayoutParams(0, -2, 1)); root.addView(header);
         ScrollView scroll = new ScrollView(this); scroll.setId(android.R.id.list); page = scroll; root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        LinearLayout content = column(); content.setPadding(0, dp(8), 0, dp(8)); scroll.addView(content);
+        scroll.setVerticalScrollBarEnabled(false);
+        LinearLayout content = column(); content.setPadding(0, dp(12), 0, dp(12)); scroll.addView(content);
         LinearLayout installed = card(content);
         installed.setPadding(dp(16), dp(16), dp(16), dp(16));
         installed.setBackground(theme.feature(getResources().getDisplayMetrics().density, 20));
@@ -97,23 +105,32 @@ public class UpdateActivity extends Activity {
         identity.addView(appIcon, new LinearLayout.LayoutParams(dp(48), dp(48)));
         LinearLayout version = column(); version.setPadding(dp(12), 0, 0, 0);
         version.addView(heading("MJReader", 22));
-        version.addView(text(tr("Установлена версия ", "Installed version ") + AppUpdates.version(this), 14, theme.muted()));
+        version.addView(text(tr("Установлена ", "Installed ") + AppUpdates.version(this), 14, theme.muted()));
         identity.addView(version, new LinearLayout.LayoutParams(0, -2, 1)); installed.addView(identity);
+        View divider = new View(this); divider.setBackgroundColor(theme.outline());
+        LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(-1, dp(1));
+        dividerParams.topMargin = dp(16);
+        dividerParams.bottomMargin = dp(8);
+        installed.addView(divider, dividerParams);
         status = text("", 16, theme.muted()); status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         LinearLayout summary = new LinearLayout(this);
         summary.setGravity(Gravity.CENTER_VERTICAL);
-        summary.setPadding(0, dp(12), 0, dp(12));
-        summary.addView(status, new LinearLayout.LayoutParams(0, -2, 1));
+        summary.setPadding(0, dp(4), 0, dp(8));
+        boolean largeText = getResources().getConfiguration().fontScale >= 1.6f;
+        summary.setOrientation(largeText ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        if (largeText) summary.setGravity(Gravity.START);
+        summary.addView(status, largeText ? new LinearLayout.LayoutParams(-1, -2)
+                : new LinearLayout.LayoutParams(0, -2, 1));
         remaining = text("", 14, theme.accent());
         remaining.setSingleLine(true);
-        remaining.setPaddingRelative(dp(8), 0, 0, 0);
+        remaining.setPaddingRelative(largeText ? 0 : dp(8), largeText ? dp(4) : 0, 0, 0);
         remaining.setCompoundDrawablePadding(dp(4));
         ReaderIcon clock = new ReaderIcon(this, "clock", theme.accent());
         clock.setBounds(0, 0, dp(18), dp(18));
         remaining.setCompoundDrawablesRelative(clock, null, null, null);
         summary.addView(remaining, new LinearLayout.LayoutParams(-2, -2));
-        content.addView(summary);
-        transfer = card(content);
+        installed.addView(summary);
+        transfer = column(); installed.addView(transfer);
         available = heading("", 18); available.setPadding(0, 0, 0, dp(8)); transfer.addView(available);
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
@@ -122,8 +139,8 @@ public class UpdateActivity extends Activity {
         progress.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         LinearLayout.LayoutParams track = new LinearLayout.LayoutParams(-1, dp(4)); track.topMargin = dp(8); track.bottomMargin = dp(8);
         transfer.addView(progress, track);
-        action = button("", true, this::act); transfer.addView(action);
-        cancel = button(tr("Отменить загрузку", "Cancel download"), false, () -> {
+        action = button("", "download", true, this::act); transfer.addView(action);
+        cancel = button(tr("Отменить загрузку", "Cancel download"), "close", false, () -> {
             busy = true; generation++; update();
             AppUpdates.WORKER.execute(() -> {
                 try {
@@ -138,13 +155,17 @@ public class UpdateActivity extends Activity {
                 }
             });
         }); transfer.addView(cancel);
-        details = text("", 15, theme.muted()); details.setPadding(0, dp(8), 0, dp(12)); transfer.addView(details);
+        notes = button(tr("Что нового", "What’s new"), null, false, () -> { notesExpanded = !notesExpanded; update(); });
+        notes.setBackground(theme.tonalFeedback(shape(android.graphics.Color.TRANSPARENT, 12), getResources().getDisplayMetrics().density));
+        transfer.addView(notes);
+        details = text("", 15, theme.muted()); details.setTag("release-notes");
+        details.setPadding(dp(12), 0, dp(12), dp(12)); transfer.addView(details);
+        check = button(tr("Проверить обновления", "Check for updates"), "refresh", false, this::checkNow);
+        installed.addView(check);
         LinearLayout checks = card(content);
-        TextView checkHeading = heading(tr("Проверка обновлений", "Update checks"), 18);
-        checkHeading.setPadding(0, 0, 0, dp(8));
-        checks.addView(checkHeading);
-        Button automatic = button(tr("Проверять автоматически", "Check automatically"), false, () -> {});
-        automatic.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        checks.setPadding(dp(12), dp(4), dp(12), dp(12));
+        Button automatic = button(tr("Автопроверка", "Automatic checks"), null, false, () -> {});
+        automatic.setBackground(theme.tonalFeedback(shape(android.graphics.Color.TRANSPARENT, 12), getResources().getDisplayMetrics().density));
         automatic.setSelected(AppUpdates.prefs(this).getBoolean("automatic", true));
         automatic.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, theme.toggleIcon(this, automatic.isSelected()), null);
         automatic.setAccessibilityDelegate(new View.AccessibilityDelegate() {
@@ -157,15 +178,15 @@ public class UpdateActivity extends Activity {
             automatic.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, theme.toggleIcon(this, automatic.isSelected()), null);
             AppUpdates.prefs(this).edit().putBoolean("automatic", automatic.isSelected()).apply();
         }); checks.addView(automatic);
-        TextView hint = text(tr("Проверка раз в сутки при открытии библиотеки. Установку подтверждает Android.",
-                "Checks once a day when you open the library. Android asks you to confirm installation."), 14, theme.muted());
-        hint.setPadding(dp(12), dp(8), dp(12), dp(8)); hint.setBackground(shape(theme.surface(), 12));
+        TextView hint = text(tr("Раз в сутки при открытии библиотеки.", "Once a day when you open the library."), 14, theme.muted());
+        hint.setPaddingRelative(dp(12), 0, dp(12), dp(4));
         checks.addView(hint);
-        check = button(tr("Проверить обновления", "Check for updates"), false, this::checkNow); checks.addView(check);
-        Button releases = button("GitHub Releases", false, () -> {
+        Button releases = button("GitHub Releases", null, false, () -> {
             try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(AppUpdates.RELEASES))); }
             catch (ActivityNotFoundException e) { message = tr("Браузер недоступен", "Browser unavailable"); update(); }
-        }); checks.addView(releases);
+        });
+        releases.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, new ReaderIcon(this, "external", theme.muted()), null);
+        content.addView(releases);
         setContentView(root); root.requestApplyInsets();
         ReaderOptions.observeWindow(root, () -> { int y = scroll.getScrollY(); render(); page.post(() -> page.scrollTo(0, y)); });
         update();
@@ -190,13 +211,10 @@ public class UpdateActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 28) heading.setAccessibilityHeading(true);
         return heading;
     }
-    private Button button(String label, boolean primary, Runnable click) {
+    private Button button(String label, String icon, boolean primary, Runnable click) {
         Button button = new Button(this); button.setText(label); button.setTextSize(16); button.setAllCaps(false); button.setMinHeight(dp(primary ? 52 : 48));
-        button.setTextColor(primary ? theme.onAccent() : theme.ink()); button.setPadding(dp(16), dp(12), dp(16), dp(12));
-        String icon = label.equals(tr("Назад", "Back")) ? "back"
-                : label.equals(tr("Проверить обновления", "Check for updates")) ? "refresh"
-                : label.equals(tr("Отменить загрузку", "Cancel download")) ? "close"
-                : label.equals("GitHub Releases") ? "external" : null;
+        button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        button.setTextColor(primary ? theme.onAccent() : theme.ink()); button.setPaddingRelative(dp(12), dp(10), dp(12), dp(10));
         if (icon != null) button.setCompoundDrawablesRelativeWithIntrinsicBounds(new ReaderIcon(this, icon, primary ? theme.onAccent() : theme.ink()), null, null, null);
         button.setCompoundDrawablePadding(dp(12));
         button.setStateListAnimator(null); button.setElevation(0);
@@ -208,6 +226,7 @@ public class UpdateActivity extends Activity {
     private void update() {
         if (status == null) return;
         if (!status.getText().toString().equals(message)) status.setText(message);
+        ((View) status.getParent()).setVisibility(message.isBlank() ? View.GONE : View.VISIBLE);
         status.setTextColor(failed ? theme.error() : theme.muted());
         boolean downloading = downloadId() >= 0;
         boolean showEstimate = etaSeconds >= 0 && downloading && !busy && !ready && !failed;
@@ -224,7 +243,12 @@ public class UpdateActivity extends Activity {
         available.setText(release == null ? "" : "MJReader " + release.version() + " · " + android.text.format.Formatter.formatShortFileSize(this, release.size()));
         String description = release == null ? "" : release.notes();
         if (!details.getText().toString().equals(description)) details.setText(description);
-        details.setVisibility(description.isBlank() ? View.GONE : View.VISIBLE);
+        notes.setVisibility(description.isBlank() ? View.GONE : View.VISIBLE);
+        notes.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null,
+                new ReaderIcon(this, notesExpanded ? "up" : "down", theme.muted()), null);
+        if (Build.VERSION.SDK_INT >= 30) notes.setStateDescription(notesExpanded
+                ? tr("Развёрнуто", "Expanded") : tr("Свёрнуто", "Collapsed"));
+        details.setVisibility(!description.isBlank() && notesExpanded ? View.VISIBLE : View.GONE);
         progress.setVisibility(percent < 0 || ready || failed ? View.GONE : View.VISIBLE);
         if (percent >= 0) progress.setProgress(percent);
         action.setText(ready ? tr("Установить обновление", "Install update") : failed ? tr("Повторить загрузку", "Retry download") : tr("Скачать обновление", "Download update"));

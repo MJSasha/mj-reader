@@ -111,6 +111,15 @@ final class UpdateCheck {
                 test.runOnMainSync(() -> {
                     Button download = button(active.getWindow().getDecorView(), "Download update");
                     if (download == null || !download.isEnabled() || download.getHeight() < 48 * context.getResources().getDisplayMetrics().density) throw new AssertionError("Update action / target size");
+                    Button notes = button(active.getWindow().getDecorView(), "What’s new");
+                    TextView description = active.getWindow().getDecorView().findViewWithTag("release-notes");
+                    if (notes == null || description == null || description.getVisibility() != View.GONE)
+                        throw new AssertionError("Release notes must start collapsed");
+                    notes.performClick();
+                    if (description.getVisibility() != View.VISIBLE || !update.notes().contentEquals(description.getText()))
+                        throw new AssertionError("Expanded release notes must display the original text");
+                    notes.performClick();
+                    if (description.getVisibility() != View.GONE) throw new AssertionError("Release notes could not collapse");
                 });
                 test.runOnMainSync(() -> {
                     ScrollView page = active.findViewById(android.R.id.list);

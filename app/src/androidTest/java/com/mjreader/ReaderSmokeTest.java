@@ -1366,6 +1366,30 @@ public class ReaderSmokeTest extends Instrumentation {
                 if (!library.findViewWithTag(ReaderNavigation.Tab.LIBRARY).isSelected())
                     throw new AssertionError("A rapid tab switch left the wrong destination selected");
             });
+            AlertDialog[] picker = {null};
+            String[] chapters = new String[36];
+            for (int i = 0; i < chapters.length; i++) chapters[i] = "Chapter " + (i + 1);
+            int currentChapter = 27;
+            int[] choice = {-1};
+            runOnMainSync(() -> picker[0] = new ReaderDialogs(activity, (ReaderOptions) field(activity, "options"))
+                    .setTitle("Contents").setItems(chapters, currentChapter, (dialog, which) -> choice[0] = which)
+                    .setNegativeButton(android.R.string.cancel, null).show());
+            try {
+                waitForIdleSync();
+                capture("contents-current-chapter");
+                runOnMainSync(() -> {
+                    View decor = picker[0].getWindow().getDecorView();
+                    Button current = decor.findViewWithTag("dialog-item-" + currentChapter);
+                    var info = current.createAccessibilityNodeInfo();
+                    var bounds = new android.graphics.Rect();
+                    if (!current.getText().toString().equals(chapters[currentChapter]) || !info.isCheckable() || !info.isChecked()
+                            || !current.getGlobalVisibleRect(bounds) || bounds.height() != current.getHeight())
+                        throw new AssertionError("The current chapter must open fully visible and announce its selection");
+                    current.performClick();
+                    if (choice[0] != currentChapter || picker[0].isShowing())
+                        throw new AssertionError("Contents did not preserve the source chapter index");
+                });
+            } finally { runOnMainSync(picker[0]::dismiss); }
         } finally { runOnMainSync(activity::finish); }
     }
     private void pagesCheck() throws Exception {
