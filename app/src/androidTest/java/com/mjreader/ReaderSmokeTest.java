@@ -1767,9 +1767,11 @@ public class ReaderSmokeTest extends Instrumentation {
             int[] top = new int[2], body = new int[2], bottom = new int[2];
             title.getLocationOnScreen(top); list.getLocationOnScreen(body);
             ViewGroup root = (ViewGroup) field(activity, "root");
-            View dock = root.getChildAt(root.getChildCount() - 1); dock.getLocationOnScreen(bottom);
-            if (body[1] < top[1] + title.getHeight() || body[1] + list.getHeight() >= bottom[1])
-                throw new AssertionError("Content overlaps masthead or bottom actions");
+            View dock = root.findViewWithTag(ReaderNavigation.TAG); dock.getLocationOnScreen(bottom);
+            int listBottom = body[1] + list.getHeight();
+            if (body[1] < top[1] + title.getHeight() || listBottom <= bottom[1] + dock.getHeight()
+                    || list.getClipToPadding() || listBottom - list.getPaddingBottom() >= bottom[1])
+                throw new AssertionError("List must draw behind the dock and scroll its last row clear of the actions");
         });
     }
     private void assertFloatingInsets(Activity activity, boolean navigation) {
@@ -1787,7 +1789,8 @@ public class ReaderSmokeTest extends Instrumentation {
                             .setVisible(WindowInsets.Type.navigationBars(), dp != 0)
                             .build();
                     root.dispatchApplyWindowInsets(insets);
-                    if (root.getPaddingBottom() != Math.round(Math.max(8, dp) * density)
+                    int bottom = navigation ? ((ViewGroup.MarginLayoutParams) dock.getLayoutParams()).bottomMargin : root.getPaddingBottom();
+                    if (bottom != Math.round(Math.max(8, dp) * density)
                             || navigation && dock.getVisibility() != View.VISIBLE)
                         throw new AssertionError("Floating panel did not use the larger of 8 dp and the bottom inset");
                 }
@@ -1814,7 +1817,11 @@ public class ReaderSmokeTest extends Instrumentation {
                     WindowInsets insets = root.getRootWindowInsets();
                     if (insets != null && !insets.isVisible(bars) && insets.getSystemWindowInsetBottom() == 0) {
                         int gap = Math.round(8 * activity.getResources().getDisplayMetrics().density);
-                        ready[0] = root.getPaddingBottom() == gap;
+                        View dock = root.findViewWithTag(ReaderNavigation.TAG);
+                        int[] rootPosition = new int[2], dockPosition = new int[2];
+                        root.getLocationOnScreen(rootPosition);
+                        dock.getLocationOnScreen(dockPosition);
+                        ready[0] = rootPosition[1] + root.getHeight() - dockPosition[1] - dock.getHeight() == gap;
                     }
                 });
                 if (!ready[0]) Thread.sleep(100);
