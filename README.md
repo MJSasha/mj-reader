@@ -1,26 +1,28 @@
-<p align="center"><img src="docs/images/banner.svg" alt="MJReader — пространство для чтения" width="100%"></p>
+# MJReader
+
+<p align="center"><img src="docs/images/banner.svg" alt="MJReader — Пространство для чтения" width="100%"></p>
 
 <p align="center">
-  <a href="https://github.com/MJSasha/mj-reader/actions/workflows/ci.yml"><img src="https://github.com/MJSasha/mj-reader/actions/workflows/ci.yml/badge.svg" alt="Checks"></a>
-  <a href="https://github.com/MJSasha/mj-reader/releases/latest"><img src="https://img.shields.io/github/v/release/MJSasha/mj-reader?label=APK&amp;color=cda5ff" alt="Latest APK"></a>
-  <img src="https://img.shields.io/badge/Android-8.0%2B-cda5ff?logo=android&amp;logoColor=cda5ff" alt="Android 8.0+">
-  <img src="https://img.shields.io/badge/Java-17-8bd9ff" alt="Java 17">
+  <a href="https://github.com/MJSasha/mj-reader/releases/latest"><img src="https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-APK-C699FF?style=for-the-badge&amp;logo=android&amp;logoColor=161622" alt="Скачать APK с GitHub Releases"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/MJSasha/mj-reader/releases/latest"><b>Скачать APK</b></a> ·
-  <a href="#возможности">Возможности</a> ·
-  <a href="#сборка">Сборка</a> ·
-  <a href="docs/TESTING.md">Тестирование</a> ·
-  <a href="AGENTS.md">Для AI-агентов</a>
+  <img src="https://img.shields.io/github/v/release/MJSasha/mj-reader?label=%D0%92%D0%B5%D1%80%D1%81%D0%B8%D1%8F&amp;color=303344" alt="Версия последнего стабильного релиза">
+  <img src="https://img.shields.io/badge/Android_8.0%2B-F25BD5" alt="Android 8.0+">
+  <a href="https://github.com/MJSasha/mj-reader/actions/workflows/ci.yml"><img src="https://github.com/MJSasha/mj-reader/actions/workflows/ci.yml/badge.svg" alt="Статус проверок"></a>
 </p>
 
-**MJReader** — нативная читалка для Android с собственной библиотекой, четырьмя темами,
-режимом RSVP на русском и английском и каталогом книг с загрузкой прямо в приложение.
-Интерфейс адаптируется к телефону, раскрытому Fold и планшетному окну.
+<p align="center">
+  <a href="#как-выглядит">Скриншоты</a> · <a href="#возможности">Возможности</a> · <a href="#установка">Установка</a> · <a href="#сборка">Сборка</a> · <a href="docs/TESTING.md">Документация</a>
+</p>
 
-*Native Android EPUB/FB2/TXT reader with bilingual RSVP, adaptive layouts and an OPDS catalog.
-Built with Java and Android Views, without runtime third-party dependencies.*
+Книги, настройки чтения и быстрый режим RSVP на Android.
+
+| Главное | Что можно делать |
+| --- | --- |
+| **Библиотека** | Импорт EPUB, FB2 и TXT, коллекции и поиск. |
+| **Чтение** | Страницы или прокрутка, четыре темы, закладки и сноски. |
+| **Режим RSVP** | Чтение по одному слову, с профилями для русского и английского. |
 
 ## Как выглядит
 
@@ -54,6 +56,9 @@ Built with Java and Android Views, without runtime third-party dependencies.*
 демоистории MJReader, названия дополнительных карточек — демонстрационные.
 
 ## Возможности
+
+<details>
+<summary><b>Полный список</b></summary>
 
 | Область | Что умеет |
 | --- | --- |
@@ -99,6 +104,8 @@ Built with Java and Android Views, without runtime third-party dependencies.*
 - В RSVP запуск и скорость доступны сразу; «Перемотка» раскрывает позицию в книге, шаги по 10 слов и переходы по фразам.
 - Контролы имеют отдельные состояния нажатия, наведения и фокуса. Индикатор открытия уважает отключение системных анимаций.
 - Большая книга размечается фрагментами около 18 тысяч символов, а не целиком при каждом открытии.
+
+</details>
 
 ## Установка
 
@@ -200,3 +207,7 @@ flowchart LR
 
 Код — Java + Android Views, один Gradle-модуль, без сторонних runtime-зависимостей.
 Исходники публичны; лицензия на распространение и модификацию пока не выбрана.
+
+## Семейство MJ
+
+<a href="https://github.com/MJSasha/mj-watch">MJWatch</a> · <a href="https://github.com/MJSasha/mj-anime">MJAnime</a>
